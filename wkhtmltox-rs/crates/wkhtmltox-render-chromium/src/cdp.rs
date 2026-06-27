@@ -24,6 +24,17 @@ pub fn parse_response(txt: &str, want_id: u64) -> Option<std::result::Result<ser
     None
 }
 
+fn set_poll_timeout(sock: &mut Sock) {
+    if let MaybeTlsStream::Plain(s) = sock.get_mut() {
+        let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(250)));
+    }
+}
+
+fn is_read_timeout(e: &tungstenite::Error) -> bool {
+    matches!(e, tungstenite::Error::Io(io)
+        if matches!(io.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
+}
+
 impl Cdp {
     pub fn call(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
         self.next_id += 1;
@@ -32,7 +43,11 @@ impl Cdp {
             .send(Message::Text(request_frame(id, method, &params)))
             .map_err(|e| WkError::Engine(format!("cdp send: {e}")))?;
         loop {
-            let msg = self.sock.read().map_err(|e| WkError::Engine(format!("cdp read: {e}")))?;
+            let msg = match self.sock.read() {
+                Ok(m) => m,
+                Err(e) if is_read_timeout(&e) => continue,
+                Err(e) => return Err(WkError::Engine(format!("cdp read: {e}"))),
+            };
             if let Message::Text(t) = msg {
                 if let Some(res) = parse_response(&t, id) {
                     return res.map_err(WkError::Engine);
@@ -44,7 +59,11 @@ impl Cdp {
     pub fn wait_event(&mut self, method: &str, timeout: Duration) -> Result<serde_json::Value> {
         let deadline = std::time::Instant::now() + timeout;
         while std::time::Instant::now() < deadline {
-            let msg = self.sock.read().map_err(|e| WkError::Engine(format!("cdp read: {e}")))?;
+            let msg = match self.sock.read() {
+                Ok(m) => m,
+                Err(e) if is_read_timeout(&e) => continue,
+                Err(e) => return Err(WkError::Engine(format!("cdp read: {e}"))),
+            };
             if let Message::Text(t) = msg {
                 let v: serde_json::Value = serde_json::from_str(&t)
                     .map_err(|e| WkError::Engine(format!("cdp json: {e}")))?;
@@ -58,7 +77,8 @@ impl Cdp {
 }
 
 pub fn connect(ws_url: &str) -> Result<Cdp> {
-    let (sock, _resp) = ws_connect(ws_url).map_err(|e| WkError::Engine(format!("cdp connect: {e}")))?;
+    let (mut sock, _resp) = ws_connect(ws_url).map_err(|e| WkError::Engine(format!("cdp connect: {e}")))?;
+    set_poll_timeout(&mut sock);
     Ok(Cdp { sock, next_id: 0 })
 }
 
