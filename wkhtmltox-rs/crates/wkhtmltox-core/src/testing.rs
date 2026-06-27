@@ -1,5 +1,5 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
-use crate::error::{Result, WkError};
+use crate::error::Result;
 use crate::render::*;
 
 /// A scriptable in-memory Renderer for browser-free tests.
@@ -40,6 +40,7 @@ impl Renderer for MockRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::WkError;
     #[test]
     fn mock_roundtrips() -> Result<()> {
         let mut r = MockRenderer::new();
