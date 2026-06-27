@@ -21,7 +21,7 @@
 #ifndef __UTILITIES_HH__
 #define __UTILITIES_HH__
 
-#include <QProxyStyle>
+#include <QCommonStyle>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageWriter>
@@ -34,10 +34,10 @@
 /**
  * Custom simplistic style
  */
-class DLL_PUBLIC MyLooksStyle: public QProxyStyle {
+class DLL_PUBLIC MyLooksStyle: public QCommonStyle {
 	Q_OBJECT
 public:
-	typedef QProxyStyle parent_t;
+	typedef QCommonStyle parent_t;
 	MyLooksStyle();
 	void drawPrimitive( PrimitiveElement element, const QStyleOption * option, QPainter * painter, const QWidget * widget = 0 ) const;
 	bool weAreDrawingForms;

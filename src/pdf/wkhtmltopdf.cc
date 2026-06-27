@@ -26,6 +26,7 @@
 #include <QWebFrame>
 #include <QtPlugin>
 #include <cstdlib>
+#include <cstdio>
 #include <iostream>
 #include <qapplication.h>
 #include <qglobal.h>
