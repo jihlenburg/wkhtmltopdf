@@ -1,0 +1,11 @@
+[package]
+name = "wkhtmltox-pdf-sys"
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+cc.workspace = true
+
+[dev-dependencies]
+lopdf.workspace = true

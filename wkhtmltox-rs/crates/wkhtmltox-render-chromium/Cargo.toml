@@ -1,0 +1,13 @@
+[package]
+name = "wkhtmltox-render-chromium"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+wkhtmltox-core = { path = "../wkhtmltox-core" }
+serde_json.workspace = true
+tungstenite.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+lopdf.workspace = true
