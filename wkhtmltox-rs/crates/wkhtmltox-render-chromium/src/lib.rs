@@ -2,3 +2,4 @@
 #![forbid(unsafe_code)]
 pub mod cdp;
 pub mod launch;
+pub mod renderer;

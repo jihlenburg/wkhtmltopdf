@@ -8,6 +8,7 @@ wkhtmltox-core = { path = "../wkhtmltox-core" }
 serde_json.workspace = true
 tungstenite.workspace = true
 ureq.workspace = true
+base64 = "0.22"
 
 [dev-dependencies]
 lopdf.workspace = true
