@@ -2,6 +2,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum WkError {
     #[error("load failed: {url} (http {http_status:?})")]
     Load { url: String, http_status: Option<u16> },
