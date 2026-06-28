@@ -39,6 +39,20 @@ int wkx_pdf_stamp_cells(const char* in_path, const char* out_path,
 int wkx_pdf_add_links(const char* in_path, const char* out_path,
                       const int* src_pages, const double* rects,
                       const int* dest_pages, int n);
+/* Overlay each overlay PDF's first page onto the corresponding base page as a
+ * Form XObject, translated to (tx[i], ty[i]) in PDF points (bottom-left origin).
+ *
+ * For i in 0..n: load overlay_paths[i], convert its first page to a Form XObject,
+ * copy it into base (via copyForeignObject), add it to the target page's
+ * /Resources /XObject under a unique name /WkxOv{i}, and append the content
+ * stream "q 1 0 0 1 tx ty cm /WkxOv{i} Do Q" to that page.
+ *
+ * Returns 0 on success, 1 on QPDF/std error, 2 if any page_index is out of
+ * range, 3 on unknown exception.
+ */
+int wkx_pdf_overlay_pages(const char* base_path, const char* out_path,
+                           const char** overlay_paths, const int* page_indices,
+                           const double* tx, const double* ty, int n);
 #ifdef __cplusplus
 }
 #endif

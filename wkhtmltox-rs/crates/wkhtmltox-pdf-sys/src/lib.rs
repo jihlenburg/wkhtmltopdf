@@ -5,6 +5,15 @@ use std::path::{Path, PathBuf};
 
 extern "C" {
     pub fn wkx_pdf_roundtrip(in_path: *const c_char, out_path: *const c_char) -> c_int;
+    fn wkx_pdf_overlay_pages(
+        base_path: *const c_char,
+        out_path: *const c_char,
+        overlay_paths: *const *const c_char,
+        page_indices: *const c_int,
+        tx: *const f64,
+        ty: *const f64,
+        n: c_int,
+    ) -> c_int;
     fn wkx_pdf_add_text_field(
         in_path: *const c_char,
         out_path: *const c_char,
@@ -270,4 +279,138 @@ pub fn merge(inputs: &[PathBuf], out: &Path) -> Result<(), String> {
     } else {
         Err(format!("wkx_pdf_merge rc={rc}"))
     }
+}
+
+// ── overlay_pages ─────────────────────────────────────────────────────────────
+
+/// Specifies one overlay operation: stamp the first page of the PDF at
+/// `overlay_path` onto base page `page_index` (0-based), translated to
+/// `(tx, ty)` in PDF points (bottom-left origin).
+#[derive(Debug, Clone)]
+pub struct OverlaySpec {
+    /// Filesystem path to the (single-page) overlay PDF.
+    pub overlay_path: String,
+    /// 0-based page index in the base PDF to receive the overlay.
+    pub page_index: u32,
+    /// X translation in PDF points (bottom-left origin).
+    pub tx: f64,
+    /// Y translation in PDF points (bottom-left origin).
+    pub ty: f64,
+}
+
+/// Stamp each overlay PDF's first page onto the corresponding base page as a
+/// Form XObject, returning the updated PDF bytes.
+///
+/// For each [`OverlaySpec`] the overlay PDF's first page is converted to a Form
+/// XObject, copied into the base PDF, and placed at `(tx, ty)`.  The base PDF
+/// bytes are unchanged if `specs` is empty.
+///
+/// Returns `Err` if any page index is out of range, if a path contains an
+/// interior NUL byte, or if a QPDF error occurs.
+pub fn overlay_pages(base: &[u8], specs: &[OverlaySpec]) -> Result<Vec<u8>, String> {
+    if specs.is_empty() {
+        return Ok(base.to_vec());
+    }
+    let dir = tempfile::TempDir::new().map_err(|e| e.to_string())?;
+    let base_path = dir.path().join("base.pdf");
+    std::fs::write(&base_path, base).map_err(|e| e.to_string())?;
+    let out_path = dir.path().join("out.pdf");
+
+    let base_c =
+        CString::new(base_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let out_c =
+        CString::new(out_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+
+    let ov_c: Vec<CString> = specs
+        .iter()
+        .map(|s| CString::new(s.overlay_path.as_bytes()).map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+    let ov_ptrs: Vec<*const c_char> = ov_c.iter().map(|c| c.as_ptr()).collect();
+    let idx: Vec<c_int> = specs.iter().map(|s| s.page_index as c_int).collect();
+    let txs: Vec<f64> = specs.iter().map(|s| s.tx).collect();
+    let tys: Vec<f64> = specs.iter().map(|s| s.ty).collect();
+
+    let rc = unsafe {
+        wkx_pdf_overlay_pages(
+            base_c.as_ptr(),
+            out_c.as_ptr(),
+            ov_ptrs.as_ptr(),
+            idx.as_ptr(),
+            txs.as_ptr(),
+            tys.as_ptr(),
+            specs.len() as c_int,
+        )
+    };
+    match rc {
+        0 => std::fs::read(&out_path).map_err(|e| e.to_string()),
+        2 => Err("wkx_pdf_overlay_pages: page index out of range".into()),
+        r => Err(format!("wkx_pdf_overlay_pages failed: rc={r}")),
+    }
+}
+
+// ── Test-support helpers (used by integration tests) ─────────────────────────
+
+fn make_min_pdf_bytes(pages: usize) -> Vec<u8> {
+    // Object layout: 1=Catalog, 2=Pages, 3..2+pages=Page
+    let n_objs = 2 + pages;
+    let mut buf = String::new();
+    buf.push_str("%PDF-1.4\n");
+    let mut offsets: Vec<usize> = Vec::with_capacity(n_objs);
+
+    // Object 1: Catalog
+    offsets.push(buf.len());
+    buf.push_str("1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n");
+
+    // Object 2: Pages node
+    let kids: Vec<String> = (0..pages).map(|i| format!("{} 0 R", 3 + i)).collect();
+    offsets.push(buf.len());
+    buf.push_str(&format!(
+        "2 0 obj\n<</Type/Pages/Kids[{}]/Count {}>>\nendobj\n",
+        kids.join(" "),
+        pages
+    ));
+
+    // Objects 3..2+pages: Page
+    for i in 0..pages {
+        offsets.push(buf.len());
+        buf.push_str(&format!(
+            "{} 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>\nendobj\n",
+            3 + i
+        ));
+    }
+
+    // Cross-reference table
+    let xref_offset = buf.len();
+    buf.push_str(&format!("xref\n0 {}\n", n_objs + 1));
+    buf.push_str("0000000000 65535 f \n");
+    for &off in &offsets {
+        buf.push_str(&format!("{:010} 00000 n \n", off));
+    }
+
+    // Trailer
+    buf.push_str(&format!(
+        "trailer\n<</Size {}/Root 1 0 R>>\nstartxref\n{}\n%%EOF\n",
+        n_objs + 1,
+        xref_offset
+    ));
+
+    buf.into_bytes()
+}
+
+/// Return a minimal one-page PDF as bytes.
+///
+/// For use by integration tests; mirrors the `write_min_pdf(path, 1)` helper in
+/// `tests/common/mod.rs`.
+#[doc(hidden)]
+pub fn test_support_one_page_pdf() -> Vec<u8> {
+    make_min_pdf_bytes(1)
+}
+
+/// Return a minimal two-page PDF as bytes.
+///
+/// For use by integration tests; mirrors the `write_min_pdf(path, 2)` helper in
+/// `tests/common/mod.rs`.
+#[doc(hidden)]
+pub fn test_support_two_page_pdf() -> Vec<u8> {
+    make_min_pdf_bytes(2)
 }

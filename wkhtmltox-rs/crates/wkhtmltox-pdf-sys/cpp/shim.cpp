@@ -3,6 +3,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <memory>
 #include <qpdf/QPDF.hh>
 #include <qpdf/QPDFWriter.hh>
 #include <qpdf/QPDFObjectHandle.hh>
@@ -457,6 +458,109 @@ extern "C" int wkx_pdf_add_links(const char* in_path, const char* out_path,
         return 1;
     } catch (...) {
         return 2; // unknown exception must not unwind across extern "C"
+    }
+}
+
+// Overlay each overlay PDF's first page onto the corresponding base page as a
+// Form XObject.  For each i in 0..n: load overlay_paths[i], convert its first
+// page to a Form XObject via getFormXObjectForPage(), copy it into the base PDF
+// via copyForeignObject(), register it in the target page's /Resources /XObject
+// under the unique name /WkxOv{i}, and append the content stream
+// "q 1 0 0 1 tx ty cm /WkxOv{i} Do Q" to that page.
+//
+// Returns 0 on success, 1 on std::exception, 2 if any page_index is out of
+// range, 3 on unknown exception.
+extern "C" int wkx_pdf_overlay_pages(const char* base_path, const char* out_path,
+                                      const char** overlay_paths,
+                                      const int* page_indices,
+                                      const double* tx, const double* ty, int n) {
+    try {
+        QPDF base;
+        base.processFile(base_path);
+        QPDFPageDocumentHelper pdh(base);
+        std::vector<QPDFPageObjectHelper> pages = pdh.getAllPages();
+        int page_count = (int)pages.size();
+
+        // Validate all page indices before any mutation (fail-fast).
+        for (int i = 0; i < n; ++i) {
+            if (page_indices[i] < 0 || page_indices[i] >= page_count)
+                return 2;
+        }
+
+        // Keep loaded overlay QPDF objects alive for the entire function scope —
+        // copyForeignObject needs the source QPDF alive while writing.
+        std::vector<std::shared_ptr<QPDF>> keep;
+        keep.reserve(n);
+
+        for (int i = 0; i < n; ++i) {
+            int idx = page_indices[i];
+
+            // Load the overlay PDF and get its first page as a Form XObject.
+            auto ov = std::make_shared<QPDF>();
+            ov->processFile(overlay_paths[i]);
+            keep.push_back(ov);
+
+            QPDFPageObjectHelper ovpage =
+                QPDFPageDocumentHelper(*ov).getAllPages().at(0);
+            // getFormXObjectForPage() converts the page to a Form XObject,
+            // handling /Rotate and /UserUnit (handle_transformations=true).
+            QPDFObjectHandle fx = ovpage.getFormXObjectForPage(/*handle_transformations=*/true);
+
+            // Copy the foreign Form XObject into the base PDF so it can be
+            // safely referenced after the overlay QPDF is destroyed.
+            QPDFObjectHandle fxCopied = base.copyForeignObject(fx);
+
+            // Obtain the target page object handle.
+            QPDFPageObjectHelper bp = pages.at(idx);
+            QPDFObjectHandle pageObj = bp.getObjectHandle();
+
+            // ── Ensure the page has its own local /Resources dict ────────────
+            // getAttribute with copy_if_shared=true handles inheritance (walks
+            // the /Pages tree) and ensures a local copy is placed on the page.
+            QPDFObjectHandle res = bp.getAttribute("/Resources", /*copy_if_shared=*/true);
+            if (res.isNull()) {
+                // No /Resources anywhere in the page tree — create one locally.
+                res = QPDFObjectHandle::newDictionary();
+                pageObj.replaceKey("/Resources", res);
+            }
+
+            // ── Ensure a local /XObject sub-dict ────────────────────────────
+            if (!res.hasKey("/XObject")) {
+                res.replaceKey("/XObject", QPDFObjectHandle::newDictionary());
+            } else {
+                QPDFObjectHandle xd = res.getKey("/XObject");
+                if (xd.isIndirect()) {
+                    // Shallow-copy so we don't clobber a shared XObject dict.
+                    res.replaceKey("/XObject", xd.shallowCopy());
+                }
+            }
+            QPDFObjectHandle xobjects = res.getKey("/XObject");
+
+            // Unique name per overlay: /WkxOv{i} — safe even if the same page
+            // is overlaid twice (header + footer) because i is the global loop index.
+            std::string xname = "/WkxOv" + std::to_string(i);
+            xobjects.replaceKey(xname, fxCopied);
+
+            // Build the placement content stream:
+            //   q              — save graphics state
+            //   1 0 0 1 tx ty  — translation matrix (cm operator)
+            //   /WkxOv{i} Do  — invoke the Form XObject
+            //   Q              — restore graphics state
+            std::ostringstream ss;
+            ss << "q 1 0 0 1 " << tx[i] << " " << ty[i]
+               << " cm " << xname << " Do Q\n";
+
+            QPDFObjectHandle stream = QPDFObjectHandle::newStream(&base, ss.str());
+            bp.addPageContents(stream, /*first=*/false); // append after existing content
+        }
+
+        QPDFWriter w(base, out_path);
+        w.write();
+        return 0;
+    } catch (const std::exception&) {
+        return 1;
+    } catch (...) {
+        return 3;
     }
 }
 
