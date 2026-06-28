@@ -87,6 +87,8 @@ pub enum RunMode {
     Readme,
     /// `--manpage`
     Manpage,
+    /// `--dump-default-toc-xsl`
+    DumpDefaultTocXsl,
 }
 
 /// Fully parsed wkhtmltopdf invocation.
@@ -107,6 +109,9 @@ pub struct ParsedInvocation {
     pub mode: RunMode,
     /// Warnings accumulated during parsing (unimplemented settings, etc.).
     pub warnings: Vec<String>,
+    /// When `--dump-outline <file>` is given, the outline XML is written to
+    /// this path after a successful conversion.
+    pub dump_outline: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +153,10 @@ enum SpecialKind {
     Quiet,
     /// Sets `toc = true` on the invocation.
     Toc,
+    /// Prints the default TOC XSL to stdout and exits 0 (arity 0).
+    DumpDefaultTocXsl,
+    /// Stores the next argument as the outline dump path (arity 1).
+    DumpOutline,
 }
 
 struct FlagSpec {
@@ -544,6 +553,62 @@ static FLAGS: &[FlagSpec] = &[
         target: Target::Both,
         action: Action::TwoArg("replacements"),
     },
+    // ── TOC XSL and TOC settings ─────────────────────────────────────────────
+    FlagSpec {
+        long: "xsl-style-sheet",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("tocXsl"),
+    },
+    FlagSpec {
+        long: "toc-header-text",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("toc.captionText"),
+    },
+    FlagSpec {
+        long: "disable-toc-links",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("toc.forwardLinks", "false"),
+    },
+    FlagSpec {
+        long: "disable-dotted-lines",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("toc.useDottedLines", "false"),
+    },
+    FlagSpec {
+        long: "toc-text-size-shrink",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("toc.fontScale"),
+    },
+    FlagSpec {
+        long: "toc-level-indentation",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("toc.indentation"),
+    },
+    FlagSpec {
+        long: "enable-toc-back-links",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("toc.backLinks", "true"),
+    },
+    // ── Dump utilities ───────────────────────────────────────────────────────
+    FlagSpec {
+        long: "dump-default-toc-xsl",
+        short: None,
+        target: Target::Global,
+        action: Action::Special(SpecialKind::DumpDefaultTocXsl),
+    },
+    FlagSpec {
+        long: "dump-outline",
+        short: None,
+        target: Target::Global,
+        action: Action::Special(SpecialKind::DumpOutline),
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -562,7 +627,10 @@ fn arity_of(action: &Action) -> usize {
         Action::Setting(_) => 1,
         Action::Const(_, _) => 0,
         Action::TwoArg(_) => 2,
-        Action::Special(_) => 0,
+        Action::Special(kind) => match kind {
+            SpecialKind::DumpOutline => 1,
+            _ => 0,
+        },
     }
 }
 
@@ -607,6 +675,7 @@ fn early_exit(mode: RunMode) -> ParsedInvocation {
         output: Output::Stdout,
         mode,
         warnings: Vec::new(),
+        dump_outline: None,
     }
 }
 
@@ -702,6 +771,7 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
     let mut cover: Option<Input> = None;
     let mut toc = false;
     let mut warnings: Vec<String> = Vec::new();
+    let mut dump_outline: Option<String> = None;
 
     // `pending_items`: a list of (flags_for_this_positional, positional_token).
     // Each entry is created when a positional is first encountered; the flags
@@ -744,6 +814,13 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
                     SpecialKind::Version => return Ok(early_exit(RunMode::Version)),
                     SpecialKind::Manpage => return Ok(early_exit(RunMode::Manpage)),
                     SpecialKind::Readme => return Ok(early_exit(RunMode::Readme)),
+                    SpecialKind::DumpDefaultTocXsl => {
+                        return Ok(early_exit(RunMode::DumpDefaultTocXsl));
+                    }
+                    SpecialKind::DumpOutline => {
+                        // val1 is the next token (arity 1 enforced by arity_of).
+                        dump_outline = Some(val1.to_owned());
+                    }
                     SpecialKind::Quiet => {
                         let _ = set_global(&mut global, "quiet", "true");
                         warnings.extend(global.take_warnings());
@@ -856,6 +933,7 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
         output,
         mode: RunMode::Convert,
         warnings,
+        dump_outline,
     })
 }
 
@@ -1350,5 +1428,89 @@ mod tests {
             err.contains("invalid value for --zoom"),
             "error should mention --zoom in object phase, got: {err}"
         );
+    }
+
+    // ── TOC XSL flags ─────────────────────────────────────────────────────
+
+    /// `--xsl-style-sheet` is now a recognised flag — it must parse without
+    /// "unknown option" error.
+    #[test]
+    fn xsl_style_sheet_is_accepted_flag() {
+        let inv = parse(&args(&[
+            "--xsl-style-sheet",
+            "foo.xsl",
+            "in.html",
+            "out.pdf",
+        ]))
+        .expect("--xsl-style-sheet should parse without error");
+        assert_eq!(inv.global.toc_xsl, Some("foo.xsl".to_owned()));
+    }
+
+    /// `--toc-header-text` sets the caption.
+    #[test]
+    fn toc_header_text_flag() {
+        let inv = parse(&args(&[
+            "--toc-header-text",
+            "Contents",
+            "p.html",
+            "out.pdf",
+        ]))
+        .expect("should parse");
+        assert_eq!(inv.global.toc_settings.caption_text, "Contents");
+    }
+
+    /// `--disable-dotted-lines` clears use_dotted_lines.
+    #[test]
+    fn disable_dotted_lines_flag() {
+        let inv = parse(&args(&["--disable-dotted-lines", "p.html", "out.pdf"]))
+            .expect("should parse");
+        assert!(!inv.global.toc_settings.use_dotted_lines);
+    }
+
+    /// `--disable-toc-links` clears forward_links.
+    #[test]
+    fn disable_toc_links_flag() {
+        let inv = parse(&args(&["--disable-toc-links", "p.html", "out.pdf"]))
+            .expect("should parse");
+        assert!(!inv.global.toc_settings.forward_links);
+    }
+
+    /// `--enable-toc-back-links` sets back_links.
+    #[test]
+    fn enable_toc_back_links_flag() {
+        let inv = parse(&args(&["--enable-toc-back-links", "p.html", "out.pdf"]))
+            .expect("should parse");
+        assert!(inv.global.toc_settings.back_links);
+    }
+
+    /// `--toc-text-size-shrink` sets font_scale.
+    #[test]
+    fn toc_text_size_shrink_flag() {
+        let inv = parse(&args(&["--toc-text-size-shrink", "0.7", "p.html", "out.pdf"]))
+            .expect("should parse");
+        assert!((inv.global.toc_settings.font_scale - 0.7).abs() < 1e-9);
+    }
+
+    /// `--toc-level-indentation` sets indentation string.
+    #[test]
+    fn toc_level_indentation_flag() {
+        let inv = parse(&args(&["--toc-level-indentation", "2em", "p.html", "out.pdf"]))
+            .expect("should parse");
+        assert_eq!(inv.global.toc_settings.indentation, "2em");
+    }
+
+    /// `--dump-default-toc-xsl` returns DumpDefaultTocXsl mode.
+    #[test]
+    fn dump_default_toc_xsl_mode() {
+        let inv = parse(&args(&["--dump-default-toc-xsl"])).expect("should parse");
+        assert_eq!(inv.mode, RunMode::DumpDefaultTocXsl);
+    }
+
+    /// `--dump-outline <file>` stores the path.
+    #[test]
+    fn dump_outline_flag() {
+        let inv = parse(&args(&["p.html", "--dump-outline", "outline.xml", "out.pdf"]))
+            .expect("should parse");
+        assert_eq!(inv.dump_outline, Some("outline.xml".to_owned()));
     }
 }

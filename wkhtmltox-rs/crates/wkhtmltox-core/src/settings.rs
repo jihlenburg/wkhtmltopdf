@@ -266,6 +266,14 @@ pub struct GlobalSettings {
     /// Cover page URL. `None` = no cover.
     pub cover: Option<String>,
 
+    // --- TOC XSL / custom stylesheet -----------------------------------
+    /// Path to a custom XSLT stylesheet for TOC rendering (`--xsl-style-sheet`).
+    /// `None` = use the built-in default TOC renderer.
+    pub toc_xsl: Option<String>,
+    /// Settings for the built-in default TOC renderer (caption, dotted lines,
+    /// indentation, font scale).  Ignored when `toc_xsl` is `Some`.
+    pub toc_settings: crate::tocxsl::TocXslSettings,
+
     // --- Security policy -----------------------------------------------
     /// Activate the hardened `--safe` profile.  When `true`, `to_load_settings`
     /// builds a [`ResourcePolicy`] from [`ResourcePolicy::safe_profile()`] with
@@ -327,6 +335,8 @@ impl Default for GlobalSettings {
             block_external_links: false,
             block_internal_links: false,
             warnings: Vec::new(),
+            toc_xsl: None,
+            toc_settings: crate::tocxsl::TocXslSettings::default(),
         }
     }
 }
@@ -389,8 +399,8 @@ impl GlobalSettings {
             doc_title: self.document_title.clone(),
             cover,
             load: self.to_load_settings(),
-            toc_xsl: None,
-            toc_settings: crate::tocxsl::TocXslSettings::default(),
+            toc_xsl: self.toc_xsl.clone(),
+            toc_settings: self.toc_settings.clone(),
         }
     }
 

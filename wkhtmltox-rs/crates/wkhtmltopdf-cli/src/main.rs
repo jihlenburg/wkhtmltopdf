@@ -15,7 +15,9 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use wkhtmltox_cli::{help_text, parse, Input, Output, RunMode};
 use wkhtmltox_core::assembly::assemble_pdf;
+use wkhtmltox_core::pdfread::extract_outline;
 use wkhtmltox_core::render::Source;
+use wkhtmltox_core::tocxsl::{default_toc_xsl, outline_to_xml, TocXslSettings};
 use wkhtmltox_render_chromium::renderer::{ChromiumRenderer, SpawnOpts};
 
 fn main() {
@@ -52,6 +54,12 @@ fn run(args: &[String]) -> i32 {
         // substitute (full man-page generation is deferred to a later task).
         RunMode::Readme | RunMode::Manpage => {
             print!("{}", help_text(true));
+            return 0;
+        }
+        RunMode::DumpDefaultTocXsl => {
+            // Print the default TOC XSLT stylesheet to stdout and exit 0.
+            // No rendering is performed.
+            print!("{}", default_toc_xsl(&TocXslSettings::default()));
             return 0;
         }
         RunMode::Convert => {}
@@ -184,6 +192,18 @@ fn run(args: &[String]) -> i32 {
         Err(e) => {
             eprintln!("wkhtmltopdf: conversion failed: {e}");
             return 1;
+        }
+    }
+
+    // ── --dump-outline: write outline XML extracted from the assembled PDF ────
+    // The outline is read from the final PDF's /Outlines bookmark tree.
+    // v1 limitation: the outline reflects the PDF's embedded bookmarks; it may
+    // be empty if the document contains no headings recognised by the renderer.
+    if let Some(dump_path) = &inv.dump_outline {
+        let entries = extract_outline(&out_path);
+        let xml = outline_to_xml(&entries);
+        if let Err(e) = std::fs::write(dump_path, xml.as_bytes()) {
+            eprintln!("wkhtmltopdf: warning: --dump-outline: failed to write {dump_path:?}: {e}");
         }
     }
 

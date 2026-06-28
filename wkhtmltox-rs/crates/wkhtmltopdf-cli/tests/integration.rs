@@ -190,3 +190,53 @@ fn missing_input_file_exits_nonzero() {
         "stderr should mention 'not found', got: {stderr:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// TOC XSL dump utilities (no Chrome required)
+// ---------------------------------------------------------------------------
+
+/// `--dump-default-toc-xsl` exits 0 and prints a valid XSL stylesheet.
+/// The output must contain `xsl:stylesheet` and the wkhtmltopdf outline namespace.
+#[test]
+fn dump_default_toc_xsl_exits_zero_and_prints_xsl() {
+    use std::time::Instant;
+    let start = Instant::now();
+    let out = run_bin(&["--dump-default-toc-xsl"]);
+    let elapsed = start.elapsed();
+
+    assert!(
+        out.status.success(),
+        "--dump-default-toc-xsl exited non-zero: {}",
+        out.status
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "--dump-default-toc-xsl took too long: {elapsed:?}"
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("xsl:stylesheet"),
+        "stdout should contain 'xsl:stylesheet', got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("http://wkhtmltopdf.org/outline"),
+        "stdout should contain the wkhtmltopdf outline namespace, got: {stdout:?}"
+    );
+}
+
+/// `--xsl-style-sheet foo.xsl in.html out.pdf` must not exit with
+/// "unknown option" — the flag is now accepted by the parser.
+/// (The render itself will fail because foo.xsl does not exist, but the
+/// parse step must succeed past the flag.)
+#[test]
+fn xsl_style_sheet_flag_is_not_unknown_option() {
+    // Run with a non-existent file so the binary exits non-zero (render error),
+    // but the stderr must NOT contain "unknown option" for --xsl-style-sheet.
+    let out = run_bin(&["--xsl-style-sheet", "foo.xsl", "in.html", "out.pdf"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("unknown option"),
+        "stderr must not contain 'unknown option' for --xsl-style-sheet, got: {stderr:?}"
+    );
+}

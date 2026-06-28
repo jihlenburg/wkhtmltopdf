@@ -182,6 +182,36 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
             };
         }
 
+        // ── TOC XSL / custom stylesheet ───────────────────────────────────
+        "tocXsl" => {
+            g.toc_xsl = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+        }
+        "toc.captionText" => {
+            g.toc_settings.caption_text = value.to_string();
+        }
+        "toc.useDottedLines" => {
+            g.toc_settings.use_dotted_lines = parse_bool(value)?;
+        }
+        "toc.forwardLinks" => {
+            g.toc_settings.forward_links = parse_bool(value)?;
+        }
+        "toc.backLinks" => {
+            g.toc_settings.back_links = parse_bool(value)?;
+        }
+        "toc.indentation" => {
+            g.toc_settings.indentation = value.to_string();
+        }
+        "toc.fontScale" => {
+            g.toc_settings.font_scale = value
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| WkError::BadArg(format!("invalid toc.fontScale: {value:?}")))?;
+        }
+
         // ── Recognised-but-unimplemented ──────────────────────────────────
         // These names are valid in upstream wkhtmltopdf but are not yet
         // forwarded to the Chromium engine.  We accept them silently and
@@ -430,6 +460,15 @@ pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
         "documentTitle" => g.document_title.clone(),
         "out" => g.output_path.clone(),
         "cover" => g.cover.clone().unwrap_or_default(),
+
+        // ── TOC XSL / custom stylesheet ───────────────────────────────────
+        "tocXsl" => g.toc_xsl.clone().unwrap_or_default(),
+        "toc.captionText" => g.toc_settings.caption_text.clone(),
+        "toc.useDottedLines" => g.toc_settings.use_dotted_lines.to_string(),
+        "toc.forwardLinks" => g.toc_settings.forward_links.to_string(),
+        "toc.backLinks" => g.toc_settings.back_links.to_string(),
+        "toc.indentation" => g.toc_settings.indentation.clone(),
+        "toc.fontScale" => g.toc_settings.font_scale.to_string(),
 
         // ── recognised-but-unimplemented → return empty default ───────────
         "logLevel"
@@ -1070,6 +1109,88 @@ mod tests {
     fn get_object_unknown_returns_none() {
         let o = PdfObjectSettings::default();
         assert_eq!(get_object(&o, "totally.unknown"), None);
+    }
+
+    // ── TOC XSL registry settings ─────────────────────────────────────────
+
+    /// `toc.fontScale` is stored and flows into AssembleOpts.
+    #[test]
+    fn toc_font_scale_stored_and_threads_to_assemble_opts() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "toc.fontScale", "0.5").unwrap();
+        assert!(
+            (g.toc_settings.font_scale - 0.5).abs() < 1e-9,
+            "toc_settings.font_scale should be 0.5"
+        );
+        assert!(g.warnings.is_empty(), "no warnings expected");
+        let opts = g.to_assemble_opts();
+        assert!(
+            (opts.toc_settings.font_scale - 0.5).abs() < 1e-9,
+            "AssembleOpts.toc_settings.font_scale should be 0.5"
+        );
+    }
+
+    /// `tocXsl` is stored and flows into AssembleOpts.
+    #[test]
+    fn toc_xsl_stored_and_threads_to_assemble_opts() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "tocXsl", "/x.xsl").unwrap();
+        assert_eq!(g.toc_xsl, Some("/x.xsl".to_owned()));
+        assert!(g.warnings.is_empty(), "no warnings expected");
+        let opts = g.to_assemble_opts();
+        assert_eq!(opts.toc_xsl, Some("/x.xsl".to_owned()));
+    }
+
+    /// `tocXsl` empty string clears the path.
+    #[test]
+    fn toc_xsl_empty_clears() {
+        let mut g = GlobalSettings::default();
+        g.toc_xsl = Some("old.xsl".into());
+        set_global(&mut g, "tocXsl", "").unwrap();
+        assert!(g.toc_xsl.is_none());
+    }
+
+    /// `toc.captionText` is stored correctly.
+    #[test]
+    fn toc_caption_text_stored() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "toc.captionText", "Contents").unwrap();
+        assert_eq!(g.toc_settings.caption_text, "Contents");
+        assert_eq!(get_global(&g, "toc.captionText"), Some("Contents".to_owned()));
+    }
+
+    /// `toc.useDottedLines` is stored as bool.
+    #[test]
+    fn toc_dotted_lines_stored() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "toc.useDottedLines", "false").unwrap();
+        assert!(!g.toc_settings.use_dotted_lines);
+    }
+
+    /// `toc.forwardLinks` / `toc.backLinks` are stored as bool.
+    #[test]
+    fn toc_link_settings_stored() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "toc.forwardLinks", "false").unwrap();
+        set_global(&mut g, "toc.backLinks", "true").unwrap();
+        assert!(!g.toc_settings.forward_links);
+        assert!(g.toc_settings.back_links);
+    }
+
+    /// `toc.indentation` is stored as string.
+    #[test]
+    fn toc_indentation_stored() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "toc.indentation", "2em").unwrap();
+        assert_eq!(g.toc_settings.indentation, "2em");
+    }
+
+    /// Bad `toc.fontScale` value → BadArg error.
+    #[test]
+    fn toc_font_scale_bad_value_errors() {
+        let mut g = GlobalSettings::default();
+        let err = set_global(&mut g, "toc.fontScale", "notanumber").unwrap_err();
+        assert!(matches!(err, WkError::BadArg(_)));
     }
 
     /// take_warnings drains the list.
