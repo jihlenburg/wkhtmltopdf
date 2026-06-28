@@ -24,16 +24,20 @@ pub fn find_chrome() -> Option<PathBuf> {
     CANDIDATES.iter().map(PathBuf::from).find(|p| p.exists())
 }
 
-pub fn launch_args(port: u16, user_data_dir: &str) -> Vec<String> {
-    vec![
+pub fn launch_args(port: u16, user_data_dir: &str, proxy: Option<&str>) -> Vec<String> {
+    let mut args = vec![
         "--headless=new".into(),
         format!("--remote-debugging-port={port}"),
         "--no-first-run".into(),
         "--no-default-browser-check".into(),
         "--disable-gpu".into(),
         format!("--user-data-dir={user_data_dir}"),
-        "about:blank".into(),
-    ]
+    ];
+    if let Some(p) = proxy {
+        args.push(format!("--proxy-server={p}"));
+    }
+    args.push("about:blank".into());
+    args
 }
 
 #[cfg(test)]
@@ -41,10 +45,20 @@ mod tests {
     use super::*;
     #[test]
     fn args_include_port_and_headless() {
-        let a = launch_args(9333, "/tmp/x");
+        let a = launch_args(9333, "/tmp/x", None);
         assert!(a.iter().any(|s| s == "--headless=new"));
         assert!(a.iter().any(|s| s == "--remote-debugging-port=9333"));
         assert!(a.iter().any(|s| s == "--user-data-dir=/tmp/x"));
+        assert_eq!(a.last().unwrap(), "about:blank");
+    }
+
+    #[test]
+    fn args_include_proxy_when_set() {
+        let a = launch_args(9333, "/tmp/x", Some("http://proxy.example:8080"));
+        assert!(
+            a.iter().any(|s| s == "--proxy-server=http://proxy.example:8080"),
+            "expected --proxy-server in args: {a:?}"
+        );
         assert_eq!(a.last().unwrap(), "about:blank");
     }
 }

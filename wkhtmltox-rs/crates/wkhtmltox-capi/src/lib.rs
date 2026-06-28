@@ -17,7 +17,7 @@ use wkhtmltox_core::assembly::{assemble_pdf, AssembleOpts};
 use wkhtmltox_core::registry::{get_global, get_object, set_global, set_object};
 use wkhtmltox_core::render::Source;
 use wkhtmltox_core::settings::{GlobalSettings, PdfObjectSettings};
-use wkhtmltox_render_chromium::renderer::ChromiumRenderer;
+use wkhtmltox_render_chromium::renderer::{ChromiumRenderer, SpawnOpts};
 
 // ---------------------------------------------------------------------------
 // Opaque handle type aliases
@@ -611,8 +611,9 @@ pub unsafe extern "C" fn wkhtmltopdf_convert(converter: *mut CConverter) -> c_in
         phase_emit(converter, 0);
         progress_emit(converter, 0);
 
-        // Spawn Chromium.
-        let mut renderer = match ChromiumRenderer::spawn() {
+        // Spawn Chromium, forwarding the global proxy setting if set.
+        let proxy = { let conv = &*converter; conv.global.proxy.clone() };
+        let mut renderer = match ChromiumRenderer::spawn_opts(SpawnOpts { proxy }) {
             Ok(r) => r,
             Err(e) => {
                 error_emit(converter, &format!("renderer spawn failed: {e}"));

@@ -197,6 +197,7 @@ static FLAGS: &[FlagSpec] = &[
     // ── Per-page / both-phase flags ──────────────────────────────────────────
     FlagSpec { long: "zoom",             short: None,      target: Target::Both, action: Action::Setting("load.zoomFactor")       },
     FlagSpec { long: "javascript-delay", short: None,      target: Target::Both, action: Action::Setting("load.jsdelay")          },
+    FlagSpec { long: "proxy",            short: None,      target: Target::Both, action: Action::Setting("load.proxy")            },
     FlagSpec { long: "encoding",         short: None,      target: Target::Both, action: Action::Setting("web.defaultEncoding")   },
     FlagSpec { long: "user-style-sheet", short: None,      target: Target::Both, action: Action::Setting("web.userStyleSheet")    },
 

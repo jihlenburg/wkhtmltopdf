@@ -10,6 +10,18 @@ use wkhtmltox_core::{Result, WkError};
 use crate::cdp::{connect, Cdp};
 use crate::launch::{find_chrome, launch_args};
 
+/// Options for spawning a `ChromiumRenderer`.
+///
+/// Use `SpawnOpts::default()` for a default (no-proxy) renderer, or build
+/// `SpawnOpts { proxy: Some("http://proxy:8080".into()), ..Default::default() }`
+/// to route all renderer traffic through a proxy.
+#[derive(Debug, Default)]
+pub struct SpawnOpts {
+    /// HTTP/SOCKS proxy URL passed to Chrome as `--proxy-server=<proxy>`.
+    /// `None` = no proxy (system default).
+    pub proxy: Option<String>,
+}
+
 /// Cleanup guard held during Chrome discovery/connect.
 /// Kills+waits the child and removes the user-data-dir on drop.
 /// Call `disarm()` on success to transfer ownership to `ChromiumRenderer`.
@@ -57,8 +69,54 @@ pub struct ChromiumRenderer {
 
 fn mm_to_in(mm: f64) -> f64 { mm / 25.4 }
 
+/// Build `Network.setCookies` params with the target URL as the cookie scope.
+///
+/// Pure function — no CDP calls; used by `open` and testable without a browser.
+pub fn build_cookies_params(cookies: &[(String, String)], url: &str) -> serde_json::Value {
+    let arr: Vec<serde_json::Value> = cookies
+        .iter()
+        .map(|(n, v)| json!({ "name": n, "value": v, "url": url }))
+        .collect();
+    json!({ "cookies": arr })
+}
+
+/// Build `Network.setExtraHTTPHeaders` params from custom headers + optional Basic auth.
+///
+/// Basic auth is injected as an `Authorization: Basic <b64>` header when both
+/// `username` and `password` are `Some`.  Returns `None` when both lists are
+/// empty (caller skips the CDP call).
+///
+/// Pure function — no CDP calls; used by `open` and testable without a browser.
+pub fn build_extra_headers_params(
+    custom_headers: &[(String, String)],
+    username: Option<&str>,
+    password: Option<&str>,
+) -> Option<serde_json::Value> {
+    let mut map: serde_json::Map<String, serde_json::Value> = custom_headers
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+        .collect();
+    if let (Some(u), Some(p)) = (username, password) {
+        let creds = format!("{u}:{p}");
+        let encoded = base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
+        map.insert(
+            "Authorization".into(),
+            serde_json::Value::String(format!("Basic {encoded}")),
+        );
+    }
+    if map.is_empty() {
+        None
+    } else {
+        Some(json!({ "headers": serde_json::Value::Object(map) }))
+    }
+}
+
 impl ChromiumRenderer {
     pub fn spawn() -> Result<Self> {
+        Self::spawn_opts(SpawnOpts::default())
+    }
+
+    pub fn spawn_opts(opts: SpawnOpts) -> Result<Self> {
         let chrome = find_chrome().ok_or_else(|| WkError::Engine("no chrome found".into()))?;
         let udd = std::env::temp_dir().join(format!("wkx-cdp-{}", std::process::id()));
         let udd_str = udd.to_string_lossy().to_string();
@@ -66,7 +124,7 @@ impl ChromiumRenderer {
         // Use port=0 so the OS assigns a free ephemeral port.
         // Chrome writes the actual bound port to <user_data_dir>/DevToolsActivePort.
         let child = Command::new(chrome)
-            .args(launch_args(0, &udd_str))
+            .args(launch_args(0, &udd_str, opts.proxy.as_deref()))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -160,6 +218,35 @@ impl Renderer for ChromiumRenderer {
         };
         // Persist compat CSS so wait_ready() can inject it after the page loads.
         self.compat_ua_css = load.compat_ua_css.clone();
+
+        // ── Apply networking settings via CDP ─────────────────────────────────
+        self.cdp.call("Network.enable", json!({}))?;
+
+        // Cookies require an http(s) origin; skip for file://, data:, etc.
+        if !load.cookies.is_empty()
+            && (url.starts_with("http://") || url.starts_with("https://"))
+        {
+            let params = build_cookies_params(&load.cookies, &url);
+            self.cdp.call("Network.setCookies", params)?;
+        }
+
+        if let Some(headers_params) = build_extra_headers_params(
+            &load.custom_headers,
+            load.username.as_deref(),
+            load.password.as_deref(),
+        ) {
+            self.cdp.call("Network.setExtraHTTPHeaders", headers_params)?;
+        }
+
+        if load.no_check_certificate {
+            self.cdp.call("Security.enable", json!({}))?;
+            self.cdp.call("Security.setIgnoreCertificateErrors", json!({ "ignore": true }))?;
+        }
+
+        if !load.enable_javascript {
+            self.cdp.call("Emulation.setScriptExecutionDisabled", json!({ "value": true }))?;
+        }
+
         self.cdp.call("Page.navigate", json!({ "url": url }))?;
         Ok(PageHandle(1))
     }
@@ -260,5 +347,67 @@ impl Renderer for ChromiumRenderer {
     }
     fn page_info(&self, _p: PageHandle) -> Result<PageInfo> {
         Err(WkError::Engine("page_info lands in a later milestone".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cookies_params_json_shape() {
+        let cookies = vec![
+            ("session".to_string(), "abc123".to_string()),
+            ("lang".to_string(), "en".to_string()),
+        ];
+        let p = build_cookies_params(&cookies, "https://example.com/");
+        let arr = p["cookies"].as_array().expect("cookies must be an array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["name"], "session");
+        assert_eq!(arr[0]["value"], "abc123");
+        assert_eq!(arr[0]["url"], "https://example.com/");
+        assert_eq!(arr[1]["name"], "lang");
+    }
+
+    #[test]
+    fn extra_headers_params_custom_and_auth() {
+        let headers = vec![("X-Custom".to_string(), "header-val".to_string())];
+        let p = build_extra_headers_params(&headers, Some("alice"), Some("s3cr3t"))
+            .expect("should produce Some when headers+auth present");
+        let hdrs = &p["headers"];
+        assert_eq!(hdrs["X-Custom"].as_str().unwrap(), "header-val");
+        let auth = hdrs["Authorization"].as_str().expect("Authorization must be present");
+        assert!(auth.starts_with("Basic "), "auth header must start with 'Basic '");
+        let b64 = auth.strip_prefix("Basic ").unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("must be valid base64");
+        assert_eq!(decoded, b"alice:s3cr3t");
+    }
+
+    #[test]
+    fn extra_headers_params_none_when_empty() {
+        let result = build_extra_headers_params(&[], None, None);
+        assert!(result.is_none(), "must return None when there is nothing to set");
+    }
+
+    #[test]
+    fn extra_headers_params_no_auth_when_credentials_missing() {
+        let headers = vec![("X-Foo".to_string(), "bar".to_string())];
+        let p = build_extra_headers_params(&headers, Some("user"), None)
+            .expect("should be Some with custom header present");
+        assert!(
+            p["headers"]["Authorization"].is_null(),
+            "Authorization must be absent when password is None"
+        );
+        assert_eq!(p["headers"]["X-Foo"].as_str().unwrap(), "bar");
+    }
+
+    #[test]
+    fn extra_headers_params_auth_only() {
+        let p = build_extra_headers_params(&[], Some("u"), Some("p"))
+            .expect("should be Some when auth is present");
+        let auth = p["headers"]["Authorization"].as_str().unwrap();
+        assert!(auth.starts_with("Basic "));
     }
 }

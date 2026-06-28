@@ -16,7 +16,7 @@ use tempfile::NamedTempFile;
 use wkhtmltox_cli::{help_text, parse, Input, Output, RunMode};
 use wkhtmltox_core::assembly::assemble_pdf;
 use wkhtmltox_core::render::Source;
-use wkhtmltox_render_chromium::renderer::ChromiumRenderer;
+use wkhtmltox_render_chromium::renderer::{ChromiumRenderer, SpawnOpts};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -139,7 +139,8 @@ fn run(args: &[String]) -> i32 {
 
     // ── Spawn Chromium renderer ───────────────────────────────────────────────
     eprintln!("wkhtmltopdf: starting renderer…");
-    let mut renderer = match ChromiumRenderer::spawn() {
+    let proxy = inv.global.proxy.clone();
+    let mut renderer = match ChromiumRenderer::spawn_opts(SpawnOpts { proxy }) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("wkhtmltopdf: failed to start renderer: {e}");

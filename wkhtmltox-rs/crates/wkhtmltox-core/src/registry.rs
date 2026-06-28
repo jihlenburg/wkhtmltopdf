@@ -112,6 +112,14 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
                 .parse::<u64>()
                 .map_err(|_| WkError::BadArg(format!("invalid load.jsdelay: {value:?}")))?;
         }
+        "load.proxy" => {
+            g.proxy = if value.is_empty() { None } else { Some(value.to_string()) };
+        }
+        "load.blockLocalFileAccess" => {
+            g.allow_local_file_access = !parse_bool(value)?;
+        }
+        "load.username" => g.username = value.to_string(),
+        "load.password" => g.password = value.to_string(),
 
         // ── header ────────────────────────────────────────────────────────
         "header.left" => g.header.left = value.to_string(),
@@ -375,6 +383,10 @@ pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
 
         // ── load ──────────────────────────────────────────────────────────
         "load.jsdelay" => g.javascript_delay_ms.to_string(),
+        "load.proxy" => g.proxy.clone().unwrap_or_default(),
+        "load.blockLocalFileAccess" => (!g.allow_local_file_access).to_string(),
+        "load.username" => g.username.clone(),
+        "load.password" => g.password.clone(),
 
         // ── header ────────────────────────────────────────────────────────
         "header.left" => g.header.left.clone(),

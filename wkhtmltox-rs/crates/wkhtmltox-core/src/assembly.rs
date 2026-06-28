@@ -51,6 +51,11 @@ pub struct AssembleOpts {
     ///
     /// `None` = no cover page.
     pub cover: Option<Source>,
+    /// `LoadSettings` applied to every `r.open(…)` call: cookies, headers,
+    /// auth, certificate policy, JavaScript flag.  Defaults to
+    /// `LoadSettings::default()` (no cookies, JS disabled, local-file allowed
+    /// per the permissive default).
+    pub load: LoadSettings,
 }
 
 impl Default for AssembleOpts {
@@ -63,6 +68,7 @@ impl Default for AssembleOpts {
             header_footer_font_size: 9.0,
             doc_title: String::new(),
             cover: None,
+            load: LoadSettings::default(),
         }
     }
 }
@@ -151,7 +157,7 @@ pub fn assemble_pdf(
     let page_height_px = page_height_pt / 0.75; // CSS 96 dpi → PDF 72 dpi
 
     for (i, src) in objects.iter().enumerate() {
-        let p = r.open(src, &LoadSettings::default())?;
+        let p = r.open(src, &opts.load)?;
         r.wait_ready(p, &ReadyPolicy::default())?;
         let probe = r.eval_json(p, outline::PROBE_JS)?;
         let bytes = r.print_pdf(p, geom)?;
@@ -319,7 +325,7 @@ fn render_cover(
     opts: &AssembleOpts,
 ) -> Result<(Option<PathBuf>, u32)> {
     if let Some(cover_src) = &opts.cover {
-        let cv = r.open(cover_src, &LoadSettings::default())?;
+        let cv = r.open(cover_src, &opts.load)?;
         r.wait_ready(cv, &ReadyPolicy::default())?;
         let bytes = r.print_pdf(cv, geom)?;
         let cpath = work.join("cover.pdf");
@@ -360,7 +366,7 @@ fn assemble_with_toc(
     let mut content_parts: Vec<ContentPart> = Vec::with_capacity(objects.len());
 
     for (i, src) in objects.iter().enumerate() {
-        let ph = r.open(src, &LoadSettings::default())?;
+        let ph = r.open(src, &opts.load)?;
         r.wait_ready(ph, &ReadyPolicy::default())?;
         let probe = r.eval_json(ph, outline::PROBE_JS)?;
         let bytes = r.print_pdf(ph, geom)?;
@@ -424,7 +430,7 @@ fn assemble_with_toc(
         // TODO(M3/M4): ChromiumRenderer must accept Source::Html for TOC.
         // Until then, TOC rendering is exercised via MockRenderer in tests; the
         // real-Chrome path (T6) writes the HTML to a temp file and uses file://.
-        let tp = r.open(&Source::Html(toc_html), &LoadSettings::default())?;
+        let tp = r.open(&Source::Html(toc_html), &opts.load)?;
         r.wait_ready(tp, &ReadyPolicy::default())?;
         let toc_bytes = r.print_pdf(tp, geom)?;
         let tpath = work.join(format!("toc{_iter}.pdf"));

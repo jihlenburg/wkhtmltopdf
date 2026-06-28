@@ -228,6 +228,21 @@ pub struct GlobalSettings {
     // --- Load ----------------------------------------------------------
     /// How long to wait after page load before printing (ms, default 200).
     pub javascript_delay_ms: u64,
+    /// HTTP/SOCKS proxy URL, e.g. `"http://proxy:8080"`.
+    pub proxy: Option<String>,
+    /// When `true`, TLS certificate errors are ignored.
+    pub no_check_certificate: bool,
+    /// When `true`, `file://` URLs are allowed (default matches wkhtmltopdf's
+    /// permissive behaviour).
+    pub allow_local_file_access: bool,
+    /// HTTP Basic-auth username (empty = no auth).
+    pub username: String,
+    /// HTTP Basic-auth password (empty = no auth).
+    pub password: String,
+    /// Cookies to send with page requests: list of (name, value) pairs.
+    pub cookies: Vec<(String, String)>,
+    /// Extra HTTP request headers: list of (name, value) pairs.
+    pub custom_headers: Vec<(String, String)>,
 
     // --- Header / Footer -----------------------------------------------
     pub header: HeaderFooterSettings,
@@ -272,6 +287,13 @@ impl Default for GlobalSettings {
             enable_javascript: true,
             print_background: true,
             javascript_delay_ms: 200,
+            proxy: None,
+            no_check_certificate: false,
+            allow_local_file_access: true,
+            username: String::new(),
+            password: String::new(),
+            cookies: Vec::new(),
+            custom_headers: Vec::new(),
             header: HeaderFooterSettings::default(),
             footer: HeaderFooterSettings::default(),
             produce_toc: false,
@@ -344,6 +366,22 @@ impl GlobalSettings {
             header_footer_font_size: font_size,
             doc_title: self.document_title.clone(),
             cover,
+            load: self.to_load_settings(),
+        }
+    }
+
+    /// Build a [`crate::render::LoadSettings`] from the global networking fields.
+    pub fn to_load_settings(&self) -> crate::render::LoadSettings {
+        crate::render::LoadSettings {
+            cookies: self.cookies.clone(),
+            custom_headers: self.custom_headers.clone(),
+            username: if self.username.is_empty() { None } else { Some(self.username.clone()) },
+            password: if self.password.is_empty() { None } else { Some(self.password.clone()) },
+            proxy: self.proxy.clone(),
+            no_check_certificate: self.no_check_certificate,
+            enable_javascript: self.enable_javascript,
+            allow_local_file_access: self.allow_local_file_access,
+            compat_ua_css: None,
         }
     }
 }
