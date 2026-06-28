@@ -56,6 +56,58 @@ fn min_pdf_bytes(pages: usize) -> Vec<u8> {
     buf.into_bytes()
 }
 
+/// Build a minimal valid 2-page PDF whose `/Outlines` tree contains one item
+/// titled `"Deep"` with its `/Dest` pointing at the **second** page (0-based index 1).
+///
+/// Objects:
+///  1 – Catalog  (/Pages 2 0 R  /Outlines 5 0 R)
+///  2 – Pages    (/Kids [3 0 R  4 0 R]  /Count 2)
+///  3 – Page 1
+///  4 – Page 2   ← "Deep" bookmark destination
+///  5 – Outlines root (/Count 1  /First 6 0 R  /Last 6 0 R)
+///  6 – Outline item  (/Title(Deep)  /Dest[4 0 R /XYZ 0 0 0]  /Parent 5 0 R)
+fn build_min_pdf_with_outline() -> Vec<u8> {
+    const N: usize = 6; // object numbers 1..=6
+    let mut buf = String::new();
+    buf.push_str("%PDF-1.4\n");
+    let mut offsets = vec![0usize; N + 1]; // index 0 unused; [1]..=[6]
+
+    offsets[1] = buf.len();
+    buf.push_str("1 0 obj\n<</Type/Catalog/Pages 2 0 R/Outlines 5 0 R>>\nendobj\n");
+
+    offsets[2] = buf.len();
+    buf.push_str("2 0 obj\n<</Type/Pages/Kids[3 0 R 4 0 R]/Count 2>>\nendobj\n");
+
+    offsets[3] = buf.len();
+    buf.push_str("3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>\nendobj\n");
+
+    offsets[4] = buf.len();
+    buf.push_str("4 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>\nendobj\n");
+
+    offsets[5] = buf.len();
+    buf.push_str("5 0 obj\n<</Type/Outlines/Count 1/First 6 0 R/Last 6 0 R>>\nendobj\n");
+
+    offsets[6] = buf.len();
+    // /Dest [4 0 R /XYZ 0 0 0] — page 2 (obj 4, 0-based index 1), /XYZ destination
+    buf.push_str(
+        "6 0 obj\n<</Title(Deep)/Dest[4 0 R /XYZ 0 0 0]/Parent 5 0 R>>\nendobj\n",
+    );
+
+    let xref_offset = buf.len();
+    buf.push_str(&format!("xref\n0 {}\n", N + 1));
+    buf.push_str("0000000000 65535 f \n");
+    for i in 1..=N {
+        buf.push_str(&format!("{:010} 00000 n \n", offsets[i]));
+    }
+    buf.push_str(&format!(
+        "trailer\n<</Size {}/Root 1 0 R>>\nstartxref\n{}\n%%EOF\n",
+        N + 1,
+        xref_offset
+    ));
+
+    buf.into_bytes()
+}
+
 /// Decode a PDF string object (UTF-16BE-with-BOM or Latin-1) to a Rust String.
 fn pdf_string_to_str(bytes: &[u8]) -> String {
     if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
@@ -197,6 +249,101 @@ fn assemble_two_objects_two_pages_each() {
     assert_eq!(
         page_ref_second, page3_id,
         "second heading must point to page 3 (0-based page 2)"
+    );
+
+    let _ = std::fs::remove_file(&out);
+}
+
+/// Verify that `assemble_pdf` produces an **exact** bookmark page when the part PDF
+/// already contains an `/Outlines` tree (the Chromium `generateDocumentOutline` path).
+///
+/// The mock renderer returns a 2-page PDF with one outline item "Deep" whose `/Dest`
+/// points at page 2 (0-based index 1).  After assembly of a single object the
+/// "Deep" bookmark in the output must reference page 2, not page 1.
+#[test]
+fn exact_page_from_engine_outline() {
+    let out = std::env::temp_dir().join(format!(
+        "wkx_asm_exact_{}.pdf",
+        std::process::id()
+    ));
+
+    let mut mock = MockRenderer::new();
+    // 2-page PDF with /Outlines "Deep" → page 2 (0-based: 1)
+    mock.pdf = build_min_pdf_with_outline();
+    // Probe has NO headings: ensures the fallback path is NOT taken.
+    mock.probe = serde_json::json!({ "headings": [] });
+
+    let report = assemble_pdf(
+        &mut mock,
+        &[Source::Html("<h2>Deep</h2><p>content</p>".into())],
+        &PageGeometry::default(),
+        &out,
+        false, // no footer stamp — keep pipeline minimal
+    )
+    .expect("assemble_pdf should succeed");
+
+    assert_eq!(report.pages, 2, "one 2-page object → 2 total pages");
+    assert_eq!(report.objects, 1);
+
+    // ── lopdf structural assertions ──────────────────────────────────────────
+    let doc = lopdf::Document::load(&out).expect("lopdf must load the output");
+    let catalog = doc.catalog().expect("PDF must have a catalog");
+
+    // /Outlines must exist.
+    let outlines_ref = catalog
+        .get(b"Outlines")
+        .expect("catalog must have /Outlines")
+        .as_reference()
+        .expect("/Outlines must be an indirect ref");
+    let outlines = doc
+        .get_object(outlines_ref)
+        .expect("resolve /Outlines")
+        .as_dict()
+        .expect("/Outlines must be a dict");
+
+    // Exactly one top-level entry.
+    let count = outlines
+        .get(b"Count")
+        .expect("/Outlines must have /Count")
+        .as_i64()
+        .expect("/Count must be integer");
+    assert_eq!(count, 1, "/Outlines /Count must be 1");
+
+    // Follow /First to the "Deep" bookmark.
+    let first_ref = outlines
+        .get(b"First")
+        .expect("/Outlines must have /First")
+        .as_reference()
+        .expect("/First must be a ref");
+    let item = doc
+        .get_object(first_ref)
+        .expect("resolve first bookmark")
+        .as_dict()
+        .expect("first bookmark must be a dict");
+
+    // Verify the title is "Deep".
+    let title_obj = item.get(b"Title").expect("bookmark must have /Title");
+    let title_bytes = match title_obj {
+        lopdf::Object::String(b, _) => b.clone(),
+        _ => panic!("/Title must be a String object"),
+    };
+    assert_eq!(pdf_string_to_str(&title_bytes), "Deep");
+
+    // The /Dest must reference the 2nd page of the merged document (1-based: 2).
+    let dest = item
+        .get(b"Dest")
+        .expect("bookmark must have /Dest")
+        .as_array()
+        .expect("/Dest must be an array");
+    let dest_page_ref = dest[0]
+        .as_reference()
+        .expect("/Dest[0] must be a page object ref");
+
+    let pages = doc.get_pages();
+    let page2_id = *pages.get(&2).expect("page 2 must exist in merged PDF");
+    assert_eq!(
+        dest_page_ref, page2_id,
+        "\"Deep\" bookmark must point to page 2 (exact engine outline, not object's first page)"
     );
 
     let _ = std::fs::remove_file(&out);

@@ -4,6 +4,7 @@ pub mod assembly;
 pub mod compat;
 pub mod error;
 pub mod outline;
+pub mod pdfread;
 pub mod render;
 pub mod testing;
 pub use error::{Result, WkError};

@@ -4,6 +4,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+lopdf.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

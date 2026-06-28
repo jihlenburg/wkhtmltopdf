@@ -15,11 +15,12 @@ pub struct AssemblyReport {
 /// attach a combined `/Outlines` bookmark tree derived from the per-object heading
 /// probes, and — when `number` is `true` — stamp page-number footers.
 ///
-/// # Page-offset note (M2b TODO)
-/// Each heading currently points to its **object's first page** (`offset` at the
-/// time the object is processed).  Per-heading exact page numbers within each
-/// object are deferred to Milestone 2b, where render-engine destinations will
-/// fill in the accurate page index.
+/// # Per-heading page accuracy
+/// For each part PDF that contains an `/Outlines` tree (emitted by Chromium via
+/// `generateDocumentOutline:true`), [`crate::pdfread::extract_outline`] is used to
+/// read the **exact** local page number for every heading.  When a part has no
+/// `/Outlines`, the function falls back to the JS-probe result where every heading
+/// in that object is mapped to the object's first page.
 pub fn assemble_pdf(
     r: &mut dyn Renderer,
     objects: &[Source],
@@ -51,10 +52,19 @@ pub fn assemble_pdf(
 
         let n = wkhtmltox_pdf_sys::page_count(&part).map_err(WkError::Pdf)?;
 
-        // M2b TODO: resolve per-heading page destinations from engine anchors.
-        // For now every heading points to its object's first page (`offset`).
-        for h in outline::parse_probe(&probe) {
-            outline_items.push((h.text, offset, h.level));
+        // Prefer exact per-heading page numbers from the engine's embedded /Outlines.
+        // Fall back to the JS-probe (every heading → object's first page) when the
+        // part PDF has no /Outlines (e.g. engine outline was disabled or the document
+        // has no headings recognised by Chromium).
+        let engine_entries = crate::pdfread::extract_outline(&part);
+        if !engine_entries.is_empty() {
+            for (title, local_page, level) in engine_entries {
+                outline_items.push((title, local_page + offset, level));
+            }
+        } else {
+            for h in outline::parse_probe(&probe) {
+                outline_items.push((h.text, offset, h.level));
+            }
         }
 
         offset += n;
