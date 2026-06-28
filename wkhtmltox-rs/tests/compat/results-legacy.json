@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "name": "article",
+      "status": "OK",
+      "error": null,
+      "pages_ref": 4,
+      "pages_new": 5,
+      "delta_pages": 1,
+      "text_sim": 1.0,
+      "body_text_sim": 0.9875,
+      "outline_ref": 4,
+      "outline_new": 4,
+      "outline_ratio": 0.75,
+      "mean_ssim": 0.5111,
+      "min_ssim": 0.4917,
+      "pixel_diff_pct": 9.24,
+      "score": 0.7537
+    },
+    {
+      "name": "invoice",
+      "status": "OK",
+      "error": null,
+      "pages_ref": 1,
+      "pages_new": 2,
+      "delta_pages": 1,
+      "text_sim": 1.0,
+      "body_text_sim": 0.9823,
+      "outline_ref": 1,
+      "outline_new": 1,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.6136,
+      "min_ssim": 0.6136,
+      "pixel_diff_pct": 7.969,
+      "score": 0.5379
+    },
+    {
+      "name": "report",
+      "status": "OK",
+      "error": null,
+      "pages_ref": 4,
+      "pages_new": 6,
+      "delta_pages": 2,
+      "text_sim": 0.9875,
+      "body_text_sim": 0.9646,
+      "outline_ref": 13,
+      "outline_new": 13,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.5183,
+      "min_ssim": 0.4596,
+      "pixel_diff_pct": 9.879,
+      "score": 0.6686
+    }
+  ],
+  "aggregate": {
+    "n_ok": 3,
+    "n_errors": 0,
+    "mean_text_sim": 0.9958,
+    "mean_body_text_sim": 0.9781,
+    "min_outline_ratio": 0.75,
+    "mean_ssim": 0.5477,
+    "min_ssim_overall": 0.4596,
+    "mean_pixel_diff_pct": 9.029,
+    "mean_score": 0.6534,
+    "total_page_delta": 4,
+    "max_abs_delta_pages": 2
+  }
+}

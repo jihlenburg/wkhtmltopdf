@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Annual IT Infrastructure Assessment Report — 2024</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #222;
+    margin: 0;
+    padding: 0;
+  }
+  .cover {
+    text-align: center;
+    padding: 60pt 40pt 40pt 40pt;
+    border-bottom: 3pt solid #003366;
+    margin-bottom: 30pt;
+  }
+  .cover-org {
+    font-size: 10pt;
+    font-weight: bold;
+    letter-spacing: 1pt;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 30pt;
+  }
+  .cover-title {
+    font-size: 24pt;
+    font-weight: bold;
+    color: #003366;
+    margin-bottom: 10pt;
+    line-height: 1.3;
+  }
+  .cover-subtitle {
+    font-size: 13pt;
+    color: #555;
+    margin-bottom: 30pt;
+  }
+  .cover-meta {
+    font-size: 10pt;
+    color: #666;
+    line-height: 2;
+  }
+  .cover-meta span { font-weight: bold; color: #333; }
+  h1 {
+    font-size: 18pt;
+    color: #003366;
+    border-bottom: 2pt solid #003366;
+    padding-bottom: 4pt;
+    margin: 30pt 0 14pt 0;
+  }
+  h2 {
+    font-size: 14pt;
+    color: #003366;
+    margin: 20pt 0 8pt 0;
+    border-left: 4pt solid #4a90d9;
+    padding-left: 8pt;
+  }
+  p {
+    margin: 0 0 10pt 0;
+  }
+  ol {
+    margin: 0 0 12pt 0;
+    padding-left: 22pt;
+  }
+  ol li {
+    margin-bottom: 6pt;
+  }
+  ol li strong { color: #003366; }
+  blockquote {
+    border-left: 4pt solid #4a90d9;
+    background-color: #f0f5fb;
+    margin: 14pt 0;
+    padding: 10pt 16pt;
+    font-style: italic;
+    color: #444;
+    font-size: 10.5pt;
+  }
+  /* Data table */
+  table.data {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14pt 0 18pt 0;
+    font-size: 9.5pt;
+  }
+  table.data caption {
+    font-weight: bold;
+    font-size: 10pt;
+    text-align: left;
+    margin-bottom: 5pt;
+    color: #003366;
+  }
+  table.data thead tr {
+    background-color: #003366;
+    color: #ffffff;
+  }
+  table.data th {
+    border: 1pt solid #003366;
+    padding: 6pt 8pt;
+    font-weight: bold;
+    text-align: left;
+  }
+  table.data th.center { text-align: center; }
+  table.data td {
+    border: 1pt solid #bbb;
+    padding: 5pt 8pt;
+    vertical-align: top;
+  }
+  table.data td.center { text-align: center; }
+  table.data td.right { text-align: right; }
+  table.data tbody tr:nth-child(even) td { background-color: #f4f7fb; }
+  .risk-high { color: #c0392b; font-weight: bold; }
+  .risk-medium { color: #d35400; font-weight: bold; }
+  .risk-low { color: #27ae60; font-weight: bold; }
+  .badge {
+    display: inline-block;
+    padding: 1pt 5pt;
+    border-radius: 2pt;
+    font-size: 8pt;
+    font-weight: bold;
+  }
+  .badge-red { background-color: #fde8e8; color: #c0392b; border: 1pt solid #c0392b; }
+  .badge-amber { background-color: #fef3e2; color: #d35400; border: 1pt solid #d35400; }
+  .badge-green { background-color: #e8f8f0; color: #27ae60; border: 1pt solid #27ae60; }
+  .note-box {
+    border: 1pt solid #bbb;
+    border-left: 4pt solid #003366;
+    background-color: #f9fafc;
+    padding: 10pt 14pt;
+    margin: 14pt 0;
+    font-size: 9.5pt;
+  }
+  .note-box strong { color: #003366; }
+</style>
+</head>
+<body>
+
+  <!-- Cover section -->
+  <div class="cover">
+    <div class="cover-org">Global Technology Services &mdash; Internal Audit Division</div>
+    <div class="cover-title">Annual IT Infrastructure<br>Assessment Report</div>
+    <div class="cover-subtitle">Fiscal Year 2024 &mdash; Consolidated Enterprise Review</div>
+    <div class="cover-meta">
+      Prepared by: <span>Infrastructure Audit Team</span><br>
+      Report Reference: <span>GTS-IAD-2024-012</span><br>
+      Classification: <span>Internal &mdash; Restricted</span><br>
+      Date: <span>15 December 2024</span><br>
+      Version: <span>1.3 (Final)</span>
+    </div>
+  </div>
+
+  <h1>1. Executive Summary</h1>
+  <p>
+    This report presents the findings of the annual IT infrastructure assessment conducted across all six
+    regional data centres and 28 branch offices of the organisation during Q3 and Q4 2024. The assessment
+    evaluated hardware lifecycle status, network architecture resilience, security posture, disaster recovery
+    readiness, and adherence to regulatory obligations under ISO 27001 and the EU Network and Information
+    Security Directive (NIS2), which entered into force in member states on 17 October 2024.
+  </p>
+  <p>
+    Overall, the organisation's infrastructure maturity level improved from 2.4 to 2.9 on the five-point
+    CMMI scale compared to the prior year. Seven critical findings were identified; three have been
+    remediated since discovery, and four require board-level action plans by 31 March 2025. Capital
+    expenditure of approximately EUR 4.2 million has been recommended to address end-of-life hardware
+    across the EMEA estate.
+  </p>
+  <blockquote>
+    "The organisation has made measurable progress in patching cadence and endpoint protection coverage;
+    however, the data centre in Warsaw requires urgent attention regarding cooling redundancy and the
+    absence of an active-active failover topology for Tier-1 workloads." — Chief Information Security
+    Officer, response to draft report, 8 December 2024.
+  </blockquote>
+
+  <h1>2. Scope and Methodology</h1>
+  <p>
+    The assessment covered all systems classified as Tier-1 or Tier-2 under the organisation's Business
+    Impact Analysis (BIA) framework. Tier-3 systems were sampled at a 20% rate to provide a representative
+    baseline without duplicating routine operational monitoring.
+  </p>
+
+  <h2>2.1 Assessment Approach</h2>
+  <p>
+    A risk-based methodology was employed, combining automated network scanning (Nessus Tenable.io),
+    manual configuration reviews, structured interviews with 43 system owners, and physical walkthroughs
+    of each data centre site. Evidence was collected between 2 September and 28 November 2024.
+  </p>
+  <p>
+    Findings were rated using a five-by-five likelihood-impact matrix and mapped to the NIST Cybersecurity
+    Framework (CSF) 2.0 categories: Govern, Identify, Protect, Detect, Respond, and Recover.
+  </p>
+
+  <h2>2.2 Exclusions</h2>
+  <p>
+    The following were explicitly out of scope for this cycle: (a) cloud-native workloads hosted exclusively
+    on Azure or AWS, which are covered by a separate Cloud Security Programme review; (b) OT/SCADA systems
+    at manufacturing sites (scheduled for H1 2025); and (c) third-party managed service environments where
+    the organisation holds no administrative access.
+  </p>
+
+  <h1>3. Key Findings</h1>
+
+  <h2>3.1 Hardware Lifecycle</h2>
+  <p>
+    Thirty-one percent of servers across the estate are currently running on hardware that has exceeded
+    vendor end-of-support dates. The most acute concentration is in the Warsaw and Singapore data centres,
+    where a combined 87 servers are running on Dell PowerEdge 11G hardware with no viable upgrade path
+    under current budget allocations.
+  </p>
+
+  <h2>3.2 Network Resilience</h2>
+  <p>
+    Core switching fabric at the Frankfurt and Warsaw facilities relies on single-vendor, single-path
+    designs for inter-zone routing. A failure simulation exercise conducted on 14 October 2024 resulted
+    in a 47-minute unplanned outage for six Tier-2 applications, exceeding the 15-minute Recovery Time
+    Objective (RTO) by a factor of three. Redundant routing via BGP peer diversity has been costed and
+    is pending procurement approval.
+  </p>
+
+  <h2>3.3 Security Posture</h2>
+  <p>
+    Critical and high-severity vulnerabilities outstanding for more than 90 days fell from 214 at the
+    start of the assessment window to 89 by its close, representing a 58% reduction attributable to the
+    new automated patching policy rolled out in Q2. Multi-factor authentication (MFA) coverage reached
+    94% of all active directory accounts, up from 71% in the prior year. The remaining 6% consists
+    primarily of service accounts pending migration to a Privileged Access Management (PAM) solution.
+  </p>
+
+  <h2>3.4 Disaster Recovery Readiness</h2>
+  <p>
+    Full DR failover tests were successfully completed for 19 of 24 Tier-1 applications (79%). Three
+    applications failed their RTO targets during live failover: the ERP front-end (Oracle E-Business
+    Suite 12.2), the document management system (OpenText Documentum), and the legacy HR portal. Root
+    cause analysis for each is included in Appendix C. Two applications were not tested because of
+    scheduling conflicts with business-critical processing windows; these are carried forward to Q1 2025.
+  </p>
+
+  <h2>3.5 Regulatory Compliance</h2>
+  <p>
+    NIS2 readiness was assessed against 35 controls. Full compliance was achieved on 24 controls;
+    8 controls are in progress with documented remediation plans; 3 controls (incident notification
+    timelines, supply-chain risk management, and board-level cyber training) remain not started and
+    represent priority items for Q1 2025 action.
+  </p>
+
+  <h1>4. Priority Action Plan</h1>
+  <p>The following seven actions are ranked by risk exposure. Items 1 through 3 are designated as critical.</p>
+  <ol>
+    <li><strong>Warsaw DC cooling redundancy:</strong> Procure and install N+1 cooling units and implement temperature monitoring with automated alerting. Target completion: 28 February 2025. Budget estimate: EUR 340,000.</li>
+    <li><strong>Frankfurt network path diversity:</strong> Implement BGP multi-homing with a secondary upstream carrier. Negotiate and activate transit agreement by 31 March 2025. Estimated cost: EUR 85,000 p.a.</li>
+    <li><strong>End-of-life server refresh (EMEA):</strong> Execute hardware refresh programme for 87 end-of-life servers. Issue RFP by 15 January 2025; target deployment complete by 30 June 2025. Budget: EUR 2.8 million.</li>
+    <li><strong>PAM rollout for service accounts:</strong> Complete migration of remaining service accounts to CyberArk Privileged Access Manager by 30 April 2025. Owner: IAM Engineering.</li>
+    <li><strong>ERP DR RTO remediation:</strong> Engage Oracle Support to tune standby database switchover procedure; target RTO reduction from 4.5 hours to 45 minutes. Owner: ERP Platform team.</li>
+    <li><strong>NIS2 incident notification procedure:</strong> Draft, approve, and publish internal procedure aligned to 24/72-hour notification windows. Owner: CISO office. Target: 31 January 2025.</li>
+    <li><strong>Board cyber awareness training:</strong> Commission and deliver board-level cyber training programme; minimum 4-hour session with external facilitator. Target: Q1 2025.</li>
+  </ol>
+
+  <h1>5. Infrastructure Inventory and Status Detail</h1>
+  <p>
+    Table 1 below provides a site-by-site breakdown of assessed infrastructure components, their
+    lifecycle status, the last-reviewed date, and the overall risk rating assigned by the assessment
+    team. This table spans multiple pages to capture the full estate.
+  </p>
+
+  <table class="data">
+    <caption>Table 1 &mdash; Infrastructure Inventory Assessment Matrix (All Sites, FY 2024)</caption>
+    <thead>
+      <tr>
+        <th style="width:12%">Site</th>
+        <th style="width:20%">Component</th>
+        <th style="width:12%">Category</th>
+        <th class="center" style="width:8%">Qty</th>
+        <th style="width:12%">Vendor / Model</th>
+        <th class="center" style="width:9%">Lifecycle</th>
+        <th class="center" style="width:9%">EoS Date</th>
+        <th class="center" style="width:9%">Risk</th>
+        <th style="width:9%">Last Reviewed</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Frankfurt DC</td>
+        <td>Core compute cluster</td>
+        <td>Server</td>
+        <td class="center">24</td>
+        <td>Dell R750</td>
+        <td class="center">Active</td>
+        <td class="center">2030-06</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-09-05</td>
+      </tr>
+      <tr>
+        <td>Frankfurt DC</td>
+        <td>Edge routing</td>
+        <td>Network</td>
+        <td class="center">4</td>
+        <td>Cisco ASR 1002-X</td>
+        <td class="center">Active</td>
+        <td class="center">2027-03</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-09-06</td>
+      </tr>
+      <tr>
+        <td>Frankfurt DC</td>
+        <td>SAN storage array</td>
+        <td>Storage</td>
+        <td class="center">6</td>
+        <td>NetApp AFF A400</td>
+        <td class="center">Active</td>
+        <td class="center">2029-12</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-09-07</td>
+      </tr>
+      <tr>
+        <td>Frankfurt DC</td>
+        <td>Core switching</td>
+        <td>Network</td>
+        <td class="center">8</td>
+        <td>Cisco Nexus 9300</td>
+        <td class="center">Active</td>
+        <td class="center">2028-09</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-09-08</td>
+      </tr>
+      <tr>
+        <td>Frankfurt DC</td>
+        <td>UPS systems</td>
+        <td>Power</td>
+        <td class="center">3</td>
+        <td>APC Smart-UPS VT 40kVA</td>
+        <td class="center">Active</td>
+        <td class="center">2026-11</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-09-09</td>
+      </tr>
+      <tr>
+        <td>Warsaw DC</td>
+        <td>Legacy compute nodes</td>
+        <td>Server</td>
+        <td class="center">52</td>
+        <td>Dell PowerEdge 11G</td>
+        <td class="center">EoL</td>
+        <td class="center">2020-01</td>
+        <td class="center"><span class="badge badge-red">HIGH</span></td>
+        <td>2024-10-03</td>
+      </tr>
+      <tr>
+        <td>Warsaw DC</td>
+        <td>Primary cooling units</td>
+        <td>Facilities</td>
+        <td class="center">2</td>
+        <td>Stulz CyberAir 3</td>
+        <td class="center">EoS</td>
+        <td class="center">2022-08</td>
+        <td class="center"><span class="badge badge-red">HIGH</span></td>
+        <td>2024-10-04</td>
+      </tr>
+      <tr>
+        <td>Warsaw DC</td>
+        <td>Backup tape library</td>
+        <td>Storage</td>
+        <td class="center">1</td>
+        <td>IBM TS3500</td>
+        <td class="center">EoS</td>
+        <td class="center">2021-06</td>
+        <td class="center"><span class="badge badge-red">HIGH</span></td>
+        <td>2024-10-05</td>
+      </tr>
+      <tr>
+        <td>Warsaw DC</td>
+        <td>Aggregation switches</td>
+        <td>Network</td>
+        <td class="center">6</td>
+        <td>HP 5130 EI</td>
+        <td class="center">EoL</td>
+        <td class="center">2023-03</td>
+        <td class="center"><span class="badge badge-red">HIGH</span></td>
+        <td>2024-10-06</td>
+      </tr>
+      <tr>
+        <td>London HQ</td>
+        <td>Office LAN switches</td>
+        <td>Network</td>
+        <td class="center">18</td>
+        <td>Cisco Catalyst 9200</td>
+        <td class="center">Active</td>
+        <td class="center">2031-01</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-10-14</td>
+      </tr>
+      <tr>
+        <td>London HQ</td>
+        <td>Wi-Fi access points</td>
+        <td>Network</td>
+        <td class="center">64</td>
+        <td>Cisco Meraki MR46</td>
+        <td class="center">Active</td>
+        <td class="center">2030-07</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-10-14</td>
+      </tr>
+      <tr>
+        <td>London HQ</td>
+        <td>Video conferencing units</td>
+        <td>AV</td>
+        <td class="center">12</td>
+        <td>Cisco Room Kit Plus</td>
+        <td class="center">Active</td>
+        <td class="center">2028-09</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-10-15</td>
+      </tr>
+      <tr>
+        <td>Singapore DC</td>
+        <td>Compute cluster</td>
+        <td>Server</td>
+        <td class="center">35</td>
+        <td>Dell PowerEdge 11G</td>
+        <td class="center">EoL</td>
+        <td class="center">2020-01</td>
+        <td class="center"><span class="badge badge-red">HIGH</span></td>
+        <td>2024-10-22</td>
+      </tr>
+      <tr>
+        <td>Singapore DC</td>
+        <td>Core routers</td>
+        <td>Network</td>
+        <td class="center">2</td>
+        <td>Juniper MX204</td>
+        <td class="center">Active</td>
+        <td class="center">2029-03</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-10-23</td>
+      </tr>
+      <tr>
+        <td>Singapore DC</td>
+        <td>Shared NAS storage</td>
+        <td>Storage</td>
+        <td class="center">4</td>
+        <td>NetApp FAS 8300</td>
+        <td class="center">Active</td>
+        <td class="center">2028-06</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-10-24</td>
+      </tr>
+      <tr>
+        <td>Singapore DC</td>
+        <td>Diesel generators</td>
+        <td>Power</td>
+        <td class="center">2</td>
+        <td>Caterpillar XQ350</td>
+        <td class="center">Active</td>
+        <td class="center">2033-12</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-10-24</td>
+      </tr>
+      <tr>
+        <td>New York</td>
+        <td>Hyperconverged nodes</td>
+        <td>Server</td>
+        <td class="center">16</td>
+        <td>Nutanix NX-3170</td>
+        <td class="center">Active</td>
+        <td class="center">2027-10</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-11-04</td>
+      </tr>
+      <tr>
+        <td>New York</td>
+        <td>Internet edge firewall</td>
+        <td>Security</td>
+        <td class="center">4</td>
+        <td>Palo Alto PA-5250</td>
+        <td class="center">Active</td>
+        <td class="center">2029-01</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-05</td>
+      </tr>
+      <tr>
+        <td>New York</td>
+        <td>Load balancers</td>
+        <td>Network</td>
+        <td class="center">4</td>
+        <td>F5 BIG-IP i4600</td>
+        <td class="center">Active</td>
+        <td class="center">2028-05</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-06</td>
+      </tr>
+      <tr>
+        <td>New York</td>
+        <td>Tape vaulting solution</td>
+        <td>Storage</td>
+        <td class="center">1</td>
+        <td>Quantum Scalar i6000</td>
+        <td class="center">Active</td>
+        <td class="center">2030-03</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-06</td>
+      </tr>
+      <tr>
+        <td>Dubai</td>
+        <td>Rack servers</td>
+        <td>Server</td>
+        <td class="center">10</td>
+        <td>HPE ProLiant DL380 G10</td>
+        <td class="center">Active</td>
+        <td class="center">2026-08</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-11-18</td>
+      </tr>
+      <tr>
+        <td>Dubai</td>
+        <td>WAN routers</td>
+        <td>Network</td>
+        <td class="center">3</td>
+        <td>Cisco ISR 4451</td>
+        <td class="center">EoS</td>
+        <td class="center">2023-12</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-11-19</td>
+      </tr>
+      <tr>
+        <td>Dubai</td>
+        <td>Precision AC units</td>
+        <td>Facilities</td>
+        <td class="center">2</td>
+        <td>Vertiv Liebert PDX</td>
+        <td class="center">Active</td>
+        <td class="center">2031-04</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-19</td>
+      </tr>
+      <tr>
+        <td>Mumbai</td>
+        <td>Virtualisation hosts</td>
+        <td>Server</td>
+        <td class="center">14</td>
+        <td>Cisco UCS B200 M6</td>
+        <td class="center">Active</td>
+        <td class="center">2028-11</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-26</td>
+      </tr>
+      <tr>
+        <td>Mumbai</td>
+        <td>SD-WAN appliances</td>
+        <td>Network</td>
+        <td class="center">4</td>
+        <td>Versa Networks vEdge</td>
+        <td class="center">Active</td>
+        <td class="center">2027-09</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-26</td>
+      </tr>
+      <tr>
+        <td>Mumbai</td>
+        <td>Rack PDUs</td>
+        <td>Power</td>
+        <td class="center">20</td>
+        <td>APC AP8853</td>
+        <td class="center">Active</td>
+        <td class="center">2029-06</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-27</td>
+      </tr>
+      <tr>
+        <td>All sites</td>
+        <td>Endpoint laptops (managed)</td>
+        <td>Endpoint</td>
+        <td class="center">2,840</td>
+        <td>Various (Dell, Lenovo)</td>
+        <td class="center">Mixed</td>
+        <td class="center">Rolling</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-09-30</td>
+      </tr>
+      <tr>
+        <td>All sites</td>
+        <td>Multifunction printers</td>
+        <td>Peripheral</td>
+        <td class="center">148</td>
+        <td>Konica Minolta i-Series</td>
+        <td class="center">Active</td>
+        <td class="center">2027-06</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-10-31</td>
+      </tr>
+      <tr>
+        <td>All sites</td>
+        <td>Physical access control</td>
+        <td>Security</td>
+        <td class="center">312</td>
+        <td>Lenel OnGuard S2</td>
+        <td class="center">Active</td>
+        <td class="center">2030-12</td>
+        <td class="center"><span class="badge badge-green">LOW</span></td>
+        <td>2024-11-15</td>
+      </tr>
+      <tr>
+        <td>All sites</td>
+        <td>CCTV systems</td>
+        <td>Security</td>
+        <td class="center">628</td>
+        <td>Axis Communications</td>
+        <td class="center">Mixed</td>
+        <td class="center">Rolling</td>
+        <td class="center"><span class="badge badge-amber">MEDIUM</span></td>
+        <td>2024-11-16</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note-box">
+    <strong>Table notes:</strong> Lifecycle status "EoL" = End of Life (vendor support terminated);
+    "EoS" = End of Sale (no new units; support may continue); "Active" = currently supported.
+    Risk ratings assigned by the assessment team based on likelihood and potential business impact.
+    "Rolling" lifecycle indicates mixed refresh cohorts managed under the Endpoint Lifecycle Programme.
+  </div>
+
+  <h1>6. Conclusions and Next Steps</h1>
+  <p>
+    The organisation is on a positive trajectory with respect to IT infrastructure maturity, driven by
+    the patching automation programme, expanded MFA rollout, and the completion of the hyperconverged
+    infrastructure migration in New York. However, the concentration of end-of-life hardware in Warsaw
+    and Singapore, combined with the absence of cooling redundancy at Warsaw, constitutes an unacceptable
+    operational risk that must be addressed in the first quarter of 2025.
+  </p>
+  <p>
+    The Infrastructure Audit team will conduct a progress review in March 2025 to validate the status of
+    the seven priority actions. Findings will be presented to the Risk and Audit Committee at its next
+    scheduled meeting on 22 April 2025. Appendices A through F (not reproduced in this summary report)
+    contain full technical evidence packs, vulnerability scan outputs, and individual site assessment
+    workbooks.
+  </p>
+
+</body>
+</html>
