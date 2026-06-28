@@ -2,10 +2,10 @@
 //
 // ResourcePolicy: SSRF + local-file gating.
 //
-// Pure logic module — no I/O, no browser, no network calls. The intent is
-// that this module is exhaustively unit-testable without any external
-// dependencies and forms the single authoritative security boundary for all
-// URL decisions.
+// Pure logic module — no I/O, no browser, no network calls in the hot path.
+// The intent is that this module is exhaustively unit-testable without any
+// external dependencies and forms the single authoritative security boundary
+// for all URL decisions.
 //
 // # Design notes
 //
@@ -17,9 +17,10 @@
 //   redirect-to-`file://` hole is closed by always re-validating the
 //   destination URL rather than trusting the redirect chain.
 //
-// * Literal-IP SSRF blocking only.  DNS-rebinding (a hostname that initially
-//   resolves to a public IP, then to a private one) is a known post-v1
-//   limitation; it is not addressed here.
+// * `decide` stays pure (no network): it delegates to
+//   `decide_with_resolver(url, is_redirect, &NoopResolver)`.  The renderer
+//   supplies a real [`SystemResolver`] to catch DNS-rebinding and hostname
+//   aliases for private ranges.
 
 /// Whether a URL request should be allowed or blocked, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,39 @@ pub enum Decision {
     Allow,
     /// The URL is blocked; the `String` contains a human-readable reason.
     Block(String),
+}
+
+// ---------------------------------------------------------------------------
+// Resolver trait
+// ---------------------------------------------------------------------------
+
+/// Resolves a hostname to its IP addresses.  Injected so the policy stays
+/// pure/unit-testable; the renderer supplies a real [`SystemResolver`].
+pub trait Resolver {
+    /// Return the resolved IPs, or an empty vec on failure/unknown host.
+    fn resolve(&self, host: &str) -> Vec<std::net::IpAddr>;
+}
+
+/// Production resolver using the OS resolver.  NOTE: blocking; relies on the
+/// OS resolver timeout.  Used only on the renderer's enforcement path.
+pub struct SystemResolver;
+impl Resolver for SystemResolver {
+    fn resolve(&self, host: &str) -> Vec<std::net::IpAddr> {
+        use std::net::ToSocketAddrs;
+        (host, 0u16)
+            .to_socket_addrs()
+            .map(|it| it.map(|sa| sa.ip()).collect())
+            .unwrap_or_default()
+    }
+}
+
+/// Resolver that never resolves — backs the pure `decide` (literal-IP +
+/// loopback-alias checks only, no network).
+pub struct NoopResolver;
+impl Resolver for NoopResolver {
+    fn resolve(&self, _host: &str) -> Vec<std::net::IpAddr> {
+        Vec::new()
+    }
 }
 
 /// Policy governing which URLs a renderer is permitted to load.
@@ -99,7 +133,29 @@ impl ResourcePolicy {
     /// to close the redirect-to-`file://` vulnerability class.  The parameter
     /// is accepted so that callers can log whether the decision was for an
     /// original request or a redirect.
-    pub fn decide(&self, url: &str, _is_redirect: bool) -> Decision {
+    ///
+    /// This method is **pure** (no network I/O): it delegates to
+    /// [`decide_with_resolver`] with a [`NoopResolver`], so DNS resolution
+    /// is skipped.  Loopback hostname aliases (`localhost`, `.localhost` TLD,
+    /// `ip6-localhost`, `ip6-loopback`) and literal private IPs are still
+    /// caught without any resolver.
+    pub fn decide(&self, url: &str, is_redirect: bool) -> Decision {
+        self.decide_with_resolver(url, is_redirect, &NoopResolver)
+    }
+
+    /// Like [`decide`], but performs DNS resolution via `resolver` so that
+    /// hostnames whose records point at private IP ranges are also blocked
+    /// (requires [`block_private_ips`]).
+    ///
+    /// Pass a [`SystemResolver`] on the renderer's enforcement path.  Pass a
+    /// [`NoopResolver`] (or call [`decide`]) for purely in-process checks
+    /// where network I/O must be avoided.
+    pub fn decide_with_resolver(
+        &self,
+        url: &str,
+        _is_redirect: bool,
+        resolver: &dyn Resolver,
+    ) -> Decision {
         // --- Parse scheme -------------------------------------------------------
         // The scheme is everything before the first ':'.
         let colon = match url.find(':') {
@@ -119,16 +175,38 @@ impl ResourcePolicy {
             "data" => Decision::Allow,
 
             // ----------------------------------------------------------------
-            // HTTP / HTTPS — optionally block literal private-IP hosts.
+            // HTTP / HTTPS — optionally block private hosts.
             // ----------------------------------------------------------------
             "http" | "https" => {
                 if self.block_private_ips {
                     let host = extract_http_host(rest);
+
+                    // 1. Literal private/loopback/link-local IP.
                     if is_private_ip(host) {
                         return Decision::Block(format!(
                             "blocked: private/loopback host {:?} (SSRF protection)",
                             host
                         ));
+                    }
+
+                    // 2. Well-known loopback hostname alias (deterministic, no DNS).
+                    if is_loopback_hostname(host) {
+                        return Decision::Block(format!(
+                            "blocked: loopback hostname {:?} (SSRF protection)",
+                            host
+                        ));
+                    }
+
+                    // 3. Resolve a DNS hostname and block if ANY resolved IP is private.
+                    if !host_is_ip_literal(host) {
+                        for ip in resolver.resolve(host) {
+                            if ip_addr_is_private(ip) {
+                                return Decision::Block(format!(
+                                    "blocked: host {:?} resolves to private IP {} (SSRF protection)",
+                                    host, ip
+                                ));
+                            }
+                        }
                     }
                 }
                 Decision::Allow
@@ -262,6 +340,39 @@ fn extract_file_path(rest: &str) -> &str {
     } else {
         // Authority-free form, rest is already the path.
         rest
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hostname / IP helpers
+// ---------------------------------------------------------------------------
+
+/// Well-known loopback hostnames that always resolve to 127.0.0.1/::1.
+///
+/// RFC 6761 §6.3 reserves `localhost` and the `.localhost` TLD.
+/// `/etc/hosts` convention adds `ip6-localhost` and `ip6-loopback`.
+fn is_loopback_hostname(host: &str) -> bool {
+    let h = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    h == "localhost" || h.ends_with(".localhost") || h == "ip6-localhost" || h == "ip6-loopback"
+}
+
+/// `true` when `host` parses as a literal IP (so it needs no DNS resolution).
+fn host_is_ip_literal(host: &str) -> bool {
+    let h = host.trim();
+    let addr = if h.starts_with('[') && h.ends_with(']') {
+        &h[1..h.len() - 1]
+    } else {
+        h
+    };
+    parse_ipv4(addr).is_some() || parse_ipv6(addr).is_some()
+}
+
+/// Convenience wrapper over [`is_private_ipv4`] / [`is_private_ipv6`] for a
+/// [`std::net::IpAddr`] (e.g. as returned by a [`Resolver`]).
+fn ip_addr_is_private(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => is_private_ipv4(v4.octets()),
+        std::net::IpAddr::V6(v6) => is_private_ipv6(v6.octets()),
     }
 }
 
@@ -1317,5 +1428,174 @@ mod tests {
     fn ipv4_mapped_public_not_private() {
         // ::ffff:8.8.8.8 — public
         assert!(!is_private_ip("::ffff:8.8.8.8"));
+    }
+
+    // ========================================================================
+    // Resolver trait — MockResolver, decide_with_resolver, loopback aliases
+    // ========================================================================
+
+    use std::collections::HashMap;
+    use std::net::IpAddr;
+
+    /// Test resolver mapping hostnames to fixed IPs.
+    struct MockResolver(HashMap<String, Vec<IpAddr>>);
+    impl Resolver for MockResolver {
+        fn resolve(&self, host: &str) -> Vec<IpAddr> {
+            self.0.get(host).cloned().unwrap_or_default()
+        }
+    }
+    fn mock(pairs: &[(&str, &str)]) -> MockResolver {
+        MockResolver(
+            pairs
+                .iter()
+                .map(|(h, ip)| {
+                    (
+                        (*h).to_string(),
+                        vec![ip.parse::<IpAddr>().unwrap()],
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn safe_blocks_localhost_hostname() {
+        let p = ResourcePolicy::safe_profile();
+        // No resolver needed — the loopback-alias check is pure.
+        assert!(matches!(
+            p.decide("http://localhost/admin", false),
+            Decision::Block(_)
+        ));
+        assert!(matches!(
+            p.decide("http://localhost:6379/", false),
+            Decision::Block(_)
+        ));
+        assert!(matches!(
+            p.decide("http://app.localhost/", false),
+            Decision::Block(_)
+        ));
+        assert!(matches!(
+            p.decide("http://ip6-localhost/", false),
+            Decision::Block(_)
+        ));
+    }
+
+    #[test]
+    fn safe_blocks_hostname_resolving_to_private() {
+        let p = ResourcePolicy::safe_profile();
+        let r = mock(&[
+            ("metadata.evil.com", "169.254.169.254"),
+            ("intranet.example", "10.0.0.5"),
+        ]);
+        assert!(matches!(
+            p.decide_with_resolver("http://metadata.evil.com/latest/", false, &r),
+            Decision::Block(_)
+        ));
+        assert!(matches!(
+            p.decide_with_resolver("http://intranet.example/", false, &r),
+            Decision::Block(_)
+        ));
+    }
+
+    #[test]
+    fn safe_allows_hostname_resolving_to_public() {
+        let p = ResourcePolicy::safe_profile();
+        let r = mock(&[("example.com", "93.184.216.34")]);
+        assert!(matches!(
+            p.decide_with_resolver("http://example.com/", false, &r),
+            Decision::Allow
+        ));
+    }
+
+    #[test]
+    fn default_permissive_allows_localhost_and_private_hostnames() {
+        // The default profile must NOT block (drop-in compat).
+        let p = ResourcePolicy::default();
+        let r = mock(&[("metadata.evil.com", "169.254.169.254")]);
+        assert!(matches!(
+            p.decide("http://localhost/", false),
+            Decision::Allow
+        ));
+        assert!(matches!(
+            p.decide_with_resolver("http://metadata.evil.com/", false, &r),
+            Decision::Allow
+        ));
+    }
+
+    #[test]
+    fn safe_unresolvable_host_is_allowed_no_private_observed() {
+        let p = ResourcePolicy::safe_profile();
+        let r = mock(&[]); // resolves to nothing
+        // No private IP observed → allow (Chrome will simply fail to connect).
+        assert!(matches!(
+            p.decide_with_resolver("http://nonexistent.invalid/", false, &r),
+            Decision::Allow
+        ));
+    }
+
+    // ========================================================================
+    // is_loopback_hostname helper
+    // ========================================================================
+
+    #[test]
+    fn loopback_hostname_localhost() {
+        assert!(is_loopback_hostname("localhost"));
+    }
+
+    #[test]
+    fn loopback_hostname_subdomain_localhost() {
+        assert!(is_loopback_hostname("app.localhost"));
+        assert!(is_loopback_hostname("deep.nested.localhost"));
+    }
+
+    #[test]
+    fn loopback_hostname_ip6_aliases() {
+        assert!(is_loopback_hostname("ip6-localhost"));
+        assert!(is_loopback_hostname("ip6-loopback"));
+    }
+
+    #[test]
+    fn loopback_hostname_case_insensitive() {
+        assert!(is_loopback_hostname("LOCALHOST"));
+        assert!(is_loopback_hostname("Localhost"));
+    }
+
+    #[test]
+    fn loopback_hostname_trailing_dot_stripped() {
+        assert!(is_loopback_hostname("localhost."));
+    }
+
+    #[test]
+    fn not_loopback_hostname_example_com() {
+        assert!(!is_loopback_hostname("example.com"));
+        assert!(!is_loopback_hostname("notlocalhost"));
+        assert!(!is_loopback_hostname("localhost.example.com"));
+    }
+
+    // ========================================================================
+    // host_is_ip_literal helper
+    // ========================================================================
+
+    #[test]
+    fn ip_literal_ipv4() {
+        assert!(host_is_ip_literal("127.0.0.1"));
+        assert!(host_is_ip_literal("8.8.8.8"));
+    }
+
+    #[test]
+    fn ip_literal_ipv6_bare() {
+        assert!(host_is_ip_literal("::1"));
+    }
+
+    #[test]
+    fn ip_literal_ipv6_bracketed() {
+        assert!(host_is_ip_literal("[::1]"));
+        assert!(host_is_ip_literal("[fe80::1]"));
+    }
+
+    #[test]
+    fn not_ip_literal_hostname() {
+        assert!(!host_is_ip_literal("localhost"));
+        assert!(!host_is_ip_literal("example.com"));
     }
 }
