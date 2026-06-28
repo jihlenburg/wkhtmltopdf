@@ -336,7 +336,9 @@ extern "C" int wkx_pdf_page_count(const char* in_path) {
         QPDF q;
         q.processFile(in_path);
         return (int)QPDFPageDocumentHelper(q).getAllPages().size();
-    } catch (...) {
+    } catch (const std::exception&) {
         return -1;
+    } catch (...) {
+        return -1; // unknown exception must not unwind across extern "C"
     }
 }

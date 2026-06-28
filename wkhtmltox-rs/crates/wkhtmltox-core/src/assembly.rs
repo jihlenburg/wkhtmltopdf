@@ -1,12 +1,9 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
 use crate::error::{Result, WkError};
 use crate::outline;
 use crate::render::{LoadSettings, PageGeometry, ReadyPolicy, Renderer, Source};
-
-static CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Summary returned by [`assemble_pdf`].
 pub struct AssemblyReport {
@@ -30,18 +27,18 @@ pub fn assemble_pdf(
     out: &Path,
     number: bool,
 ) -> Result<AssemblyReport> {
-    let call_id = CALL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let tmp_dir = std::env::temp_dir().join(format!(
-        "wkx-asm-{}-{}",
-        std::process::id(),
-        call_id
-    ));
-    std::fs::create_dir_all(&tmp_dir).map_err(|e| WkError::Io(e.to_string()))?;
+    // Fix 2: reject empty input early.
+    if objects.is_empty() {
+        return Err(WkError::BadArg("no input objects".into()));
+    }
 
-    let mut parts: Vec<PathBuf> = Vec::with_capacity(objects.len());
-    // Outline items accumulated across all objects: (title, 0-based page in merged doc, level).
+    // Fix 1: use a randomised, mode-0700, fail-if-exists temp directory.
+    // TempDir auto-removes on drop — cleanup is now unconditional (leak-on-error fixed).
+    let work = tempfile::TempDir::new().map_err(|e| WkError::Io(e.to_string()))?;
+
     let mut outline_items: Vec<(String, u32, u8)> = Vec::new();
     let mut offset: u32 = 0;
+    let mut parts: Vec<std::path::PathBuf> = Vec::with_capacity(objects.len());
 
     for (i, src) in objects.iter().enumerate() {
         let p = r.open(src, &LoadSettings::default())?;
@@ -49,7 +46,7 @@ pub fn assemble_pdf(
         let probe = r.eval_json(p, outline::PROBE_JS)?;
         let bytes = r.print_pdf(p, geom)?;
 
-        let part = tmp_dir.join(format!("part{i}.pdf"));
+        let part = work.path().join(format!("part{i}.pdf"));
         std::fs::write(&part, &bytes).map_err(|e| WkError::Io(e.to_string()))?;
 
         let n = wkhtmltox_pdf_sys::page_count(&part).map_err(WkError::Pdf)?;
@@ -65,12 +62,12 @@ pub fn assemble_pdf(
     }
 
     // Merge all part PDFs into a single document.
-    let merged = tmp_dir.join("merged.pdf");
+    let merged = work.path().join("merged.pdf");
     wkhtmltox_pdf_sys::merge(&parts, &merged).map_err(WkError::Pdf)?;
 
     // Optionally embed the combined outline (bookmarks).
     let after_outline = if !outline_items.is_empty() {
-        let outlined = tmp_dir.join("outlined.pdf");
+        let outlined = work.path().join("outlined.pdf");
         wkhtmltox_pdf_sys::set_outline(&merged, &outlined, &outline_items)
             .map_err(WkError::Pdf)?;
         outlined
@@ -80,7 +77,7 @@ pub fn assemble_pdf(
 
     // Optionally stamp page-number footers.
     let final_path = if number {
-        let numbered = tmp_dir.join("numbered.pdf");
+        let numbered = work.path().join("numbered.pdf");
         wkhtmltox_pdf_sys::stamp_footer(&after_outline, &numbered, "[page] / [topage]", 1)
             .map_err(WkError::Pdf)?;
         numbered
@@ -88,11 +85,10 @@ pub fn assemble_pdf(
         after_outline
     };
 
+    // Copy result to the caller-supplied destination before `work` is dropped.
     std::fs::copy(&final_path, out).map_err(|e| WkError::Io(e.to_string()))?;
 
-    // Best-effort cleanup — ignore errors so a failure here never masks the result.
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-
+    // `work` drops here → TempDir removes the directory unconditionally.
     Ok(AssemblyReport {
         pages: offset,
         objects: objects.len(),

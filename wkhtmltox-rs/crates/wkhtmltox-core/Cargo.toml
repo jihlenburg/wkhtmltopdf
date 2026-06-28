@@ -5,6 +5,7 @@ license.workspace = true
 
 [dependencies]
 serde_json.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 wkhtmltox-pdf-sys = { path = "../wkhtmltox-pdf-sys" }
 
