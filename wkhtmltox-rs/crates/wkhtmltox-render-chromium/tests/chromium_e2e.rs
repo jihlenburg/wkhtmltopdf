@@ -75,6 +75,62 @@ fn networking_settings_accepted_headers_and_auth() {
     assert!(pdf.starts_with(b"%PDF"), "output must be a valid PDF");
 }
 
+/// Verify that back-to-back ChromiumRenderer spawns in the same process both
+/// succeed — this is the exact scenario that triggered the M3 WebSocket-reset
+/// failure.
+///
+/// The test spawns a renderer, renders a small page to PDF, drops the renderer,
+/// then immediately spawns a SECOND renderer and renders again.  Both PDFs must
+/// begin with `%PDF`.  The loop runs 3 times to surface intermittent races.
+#[test]
+#[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
+fn respawn_back_to_back() {
+    const HTML: &str =
+        "data:text/html,<html><body><h1>Respawn test</h1></body></html>";
+    let load = LoadSettings { enable_javascript: false, ..Default::default() };
+
+    for round in 0..3 {
+        // ── First renderer ────────────────────────────────────────────────────
+        let pdf_a = {
+            let mut r = ChromiumRenderer::spawn()
+                .unwrap_or_else(|e| panic!("round {round}: first spawn failed: {e}"));
+            let p = r
+                .open(&Source::Url(HTML.into()), &load)
+                .unwrap_or_else(|e| panic!("round {round}: first open failed: {e}"));
+            r.wait_ready(p, &ReadyPolicy::default())
+                .unwrap_or_else(|e| panic!("round {round}: first wait_ready failed: {e}"));
+            let pdf = r
+                .print_pdf(p, &PageGeometry::default())
+                .unwrap_or_else(|e| panic!("round {round}: first print_pdf failed: {e}"));
+            // `r` is dropped here — kills+waits Chrome and removes user-data-dir.
+            pdf
+        };
+        assert!(
+            pdf_a.starts_with(b"%PDF"),
+            "round {round}: first PDF is invalid (got {} bytes)",
+            pdf_a.len()
+        );
+
+        // ── Second renderer (rapid re-spawn — this is the M3 failure case) ───
+        let pdf_b = {
+            let mut r = ChromiumRenderer::spawn()
+                .unwrap_or_else(|e| panic!("round {round}: second spawn failed: {e}"));
+            let p = r
+                .open(&Source::Url(HTML.into()), &load)
+                .unwrap_or_else(|e| panic!("round {round}: second open failed: {e}"));
+            r.wait_ready(p, &ReadyPolicy::default())
+                .unwrap_or_else(|e| panic!("round {round}: second wait_ready failed: {e}"));
+            r.print_pdf(p, &PageGeometry::default())
+                .unwrap_or_else(|e| panic!("round {round}: second print_pdf failed: {e}"))
+        };
+        assert!(
+            pdf_b.starts_with(b"%PDF"),
+            "round {round}: second PDF is invalid (got {} bytes)",
+            pdf_b.len()
+        );
+    }
+}
+
 /// Verify that ResourcePolicy is enforced via CDP Fetch interception.
 ///
 /// The test creates a temp HTML file that references two subresources:

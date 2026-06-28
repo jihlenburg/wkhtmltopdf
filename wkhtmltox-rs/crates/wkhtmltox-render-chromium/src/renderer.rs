@@ -2,7 +2,14 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+
+/// Monotonically increasing counter so each `ChromiumRenderer::spawn` within
+/// the same process gets a unique `user-data-dir` path.  Without this, rapid
+/// back-to-back spawns reuse the same path; the second Chrome can pick up stale
+/// lock files from the still-terminating first instance.
+static SPAWN_COUNTER: AtomicU64 = AtomicU64::new(0);
 use base64::Engine as _; // see note in Step 4 about the base64 dep
 use serde_json::json;
 use wkhtmltox_core::policy::ResourcePolicy;
@@ -160,7 +167,12 @@ impl ChromiumRenderer {
 
     pub fn spawn_opts(opts: SpawnOpts) -> Result<Self> {
         let chrome = find_chrome().ok_or_else(|| WkError::Engine("no chrome found".into()))?;
-        let udd = std::env::temp_dir().join(format!("wkx-cdp-{}", std::process::id()));
+
+        // Each spawn within the same process gets a unique user-data-dir so that
+        // rapid back-to-back spawns never share or race over the same directory.
+        let spawn_n = SPAWN_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let udd = std::env::temp_dir()
+            .join(format!("wkx-cdp-{}-{}", std::process::id(), spawn_n));
         let udd_str = udd.to_string_lossy().to_string();
 
         // Use port=0 so the OS assigns a free ephemeral port.
@@ -175,7 +187,8 @@ impl ChromiumRenderer {
         // Guard ensures kill+wait+udd removal if anything below fails.
         let guard = SpawnGuard::new(child, udd.clone());
 
-        // Poll DevToolsActivePort until Chrome has bound its debugging socket.
+        // ── Step 1: Poll DevToolsActivePort until Chrome has bound its debug socket.
+        // Budget: 150 × 100 ms = 15 s.
         let dap_file = udd.join("DevToolsActivePort");
         let mut port: Option<u16> = None;
         for _ in 0..150 {
@@ -188,13 +201,17 @@ impl ChromiumRenderer {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        let port = port.ok_or_else(|| WkError::Engine("DevToolsActivePort never appeared".into()))?;
+        let port = port
+            .ok_or_else(|| WkError::Engine("DevToolsActivePort never appeared".into()))?;
 
-        // Discover a page target's websocket URL via the /json endpoint.
+        // ── Step 2: Discover a page target's websocket URL via the /json endpoint.
+        // Budget: 60 × 200 ms = 12 s.
         let mut ws_url = None;
         for _ in 0..60 {
             if let Ok(resp) = ureq::get(&format!("http://127.0.0.1:{port}/json")).call() {
-                if let Ok(list) = serde_json::from_reader::<_, serde_json::Value>(resp.into_reader()) {
+                if let Ok(list) =
+                    serde_json::from_reader::<_, serde_json::Value>(resp.into_reader())
+                {
                     if let Some(arr) = list.as_array() {
                         if let Some(t) = arr.iter().find(|t| t["type"] == "page") {
                             if let Some(u) = t["webSocketDebuggerUrl"].as_str() {
@@ -207,8 +224,34 @@ impl ChromiumRenderer {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
-        let ws_url = ws_url.ok_or_else(|| WkError::Engine("devtools endpoint never appeared".into()))?;
-        let mut cdp = connect(&ws_url)?;
+        let ws_url = ws_url
+            .ok_or_else(|| WkError::Engine("devtools endpoint never appeared".into()))?;
+
+        // ── Step 3: Open the CDP WebSocket with bounded retry + backoff.
+        //
+        // Chrome may respond to /json before its WebSocket server is fully bound
+        // (e.g. on rapid re-spawn when the OS is reusing ephemeral ports).
+        // Retry up to 40 times with 150 ms sleep between attempts (~6 s budget).
+        // Connection-refused / reset are both retryable; any other error is fatal.
+        let mut cdp = {
+            const MAX_CONNECT_ATTEMPTS: u32 = 40;
+            let mut last_err: Option<wkhtmltox_core::WkError> = None;
+            let mut connected = None;
+            for attempt in 0..MAX_CONNECT_ATTEMPTS {
+                match connect(&ws_url) {
+                    Ok(c) => { connected = Some(c); break; }
+                    Err(e) => {
+                        last_err = Some(e);
+                        if attempt + 1 < MAX_CONNECT_ATTEMPTS {
+                            std::thread::sleep(Duration::from_millis(150));
+                        }
+                    }
+                }
+            }
+            connected.ok_or_else(|| {
+                last_err.unwrap_or_else(|| WkError::Engine("cdp connect: no attempts made".into()))
+            })?
+        };
         cdp.call("Page.enable", json!({}))?;
 
         // All succeeded — disarm the guard and hand ownership to ChromiumRenderer.
