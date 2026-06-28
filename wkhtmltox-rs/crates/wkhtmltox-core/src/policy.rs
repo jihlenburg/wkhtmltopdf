@@ -80,12 +80,27 @@ pub struct ResourcePolicy {
     /// so that `/var/www` does **not** accidentally permit `/var/www-evil`.
     pub allowed_paths: Vec<String>,
 
-    /// Block HTTP/HTTPS requests whose host is a *literal* private, loopback,
-    /// or link-local IP address (see [`is_private_ip`] for the full list of
-    /// matched ranges).
+    /// Block HTTP/HTTPS requests to private, loopback, and link-local addresses.
     ///
-    /// Non-IP hostnames are **not** blocked even when this flag is set —
-    /// DNS-rebinding is a documented post-v1 limitation.
+    /// When set, three layers of protection apply:
+    ///
+    /// 1. **Literal private IPs** — any host that parses as a private/loopback/
+    ///    link-local IP (including alternative encodings such as hex/octal/integer
+    ///    and IPv6-mapped forms) is blocked immediately; see [`is_private_ip`].
+    ///
+    /// 2. **Well-known loopback hostnames** — `localhost`, any `*.localhost` TLD
+    ///    name, `ip6-localhost`, and `ip6-loopback` are blocked without DNS
+    ///    resolution via [`decide`] (pure path).
+    ///
+    /// 3. **DNS-resolved hostnames** — when a [`Resolver`] is supplied via
+    ///    [`decide_with_resolver`] (the renderer uses [`SystemResolver`]), any
+    ///    non-IP hostname is resolved and blocked if **any** returned record is
+    ///    a private IP.
+    ///
+    /// **Residual limitation:** [`decide`] uses a [`NoopResolver`] and therefore
+    /// skips DNS resolution.  Active DNS-rebinding (TTL=0 flip between the policy
+    /// check and Chrome's connect) remains possible even with a real resolver — a
+    /// known, documented limitation.
     pub block_private_ips: bool,
 
     /// Allow navigational external hyperlinks (e.g. `<a href="…">`).
@@ -1533,6 +1548,21 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn safe_blocks_host_with_mixed_public_and_private_records() {
+        let p = ResourcePolicy::safe_profile();
+        // public first, private second — loop must continue past the public and block.
+        let r = MockResolver(
+            [("mixed.example".to_string(),
+              vec!["93.184.216.34".parse::<IpAddr>().unwrap(), "10.0.0.5".parse::<IpAddr>().unwrap()])]
+                .into_iter().collect(),
+        );
+        assert!(matches!(
+            p.decide_with_resolver("http://mixed.example/", false, &r),
+            Decision::Block(_)
+        ));
+    }
+
     // ========================================================================
     // is_loopback_hostname helper
     // ========================================================================
@@ -1558,6 +1588,8 @@ mod tests {
     fn loopback_hostname_case_insensitive() {
         assert!(is_loopback_hostname("LOCALHOST"));
         assert!(is_loopback_hostname("Localhost"));
+        assert!(is_loopback_hostname("IP6-LOCALHOST"));
+        assert!(is_loopback_hostname("IP6-Loopback"));
     }
 
     #[test]
