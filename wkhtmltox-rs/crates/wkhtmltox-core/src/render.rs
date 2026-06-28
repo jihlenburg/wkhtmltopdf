@@ -78,7 +78,10 @@ pub struct ReadyPolicy {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Orientation { Portrait, Landscape }
+pub enum Orientation {
+    Portrait,
+    Landscape,
+}
 
 #[derive(Debug, Clone)]
 pub struct PageGeometry {
@@ -97,18 +100,26 @@ pub struct PageGeometry {
 impl Default for PageGeometry {
     fn default() -> Self {
         Self {
-            width_mm: 210.0, height_mm: 297.0, // A4
-            margin_top_mm: 10.0, margin_bottom_mm: 10.0,
-            margin_left_mm: 10.0, margin_right_mm: 10.0,
+            width_mm: 210.0,
+            height_mm: 297.0, // A4
+            margin_top_mm: 10.0,
+            margin_bottom_mm: 10.0,
+            margin_left_mm: 10.0,
+            margin_right_mm: 10.0,
             orientation: Orientation::Portrait,
-            scale: 1.0, print_background: true, prefer_css_page_size: true,
+            scale: 1.0,
+            print_background: true,
+            prefer_css_page_size: true,
             generate_document_outline: true,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageFormat { Png, Jpeg }
+pub enum ImageFormat {
+    Png,
+    Jpeg,
+}
 
 #[derive(Debug, Clone)]
 pub struct SnapshotOpts {
@@ -118,14 +129,28 @@ pub struct SnapshotOpts {
     pub quality: u8,
 }
 impl Default for SnapshotOpts {
-    fn default() -> Self { Self { format: ImageFormat::Png, crop: None, scale: 1.0, quality: 94 } }
+    fn default() -> Self {
+        Self {
+            format: ImageFormat::Png,
+            crop: None,
+            scale: 1.0,
+            quality: 94,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
-pub struct RawImage { pub bytes: Vec<u8>, pub format: ImageFormat }
+pub struct RawImage {
+    pub bytes: Vec<u8>,
+    pub format: ImageFormat,
+}
 
 #[derive(Debug, Clone)]
-pub struct PageInfo { pub title: String, pub final_url: String, pub content_height_px: f64 }
+pub struct PageInfo {
+    pub title: String,
+    pub final_url: String,
+    pub content_height_px: f64,
+}
 
 /// The seam. Blocking from the core's view; backends hide the async engine.
 pub trait Renderer {

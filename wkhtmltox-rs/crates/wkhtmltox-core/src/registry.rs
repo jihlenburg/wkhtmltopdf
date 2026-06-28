@@ -15,8 +15,10 @@
 
 use crate::error::{Result, WkError};
 use crate::render::Orientation;
-use crate::settings::{parse_bool, parse_length_mm, ColorMode, GlobalSettings,
-                      ImageGlobalSettings, NamedPageSize, PdfObjectSettings};
+use crate::settings::{
+    parse_bool, parse_length_mm, ColorMode, GlobalSettings, ImageGlobalSettings, NamedPageSize,
+    PdfObjectSettings,
+};
 
 // ---------------------------------------------------------------------------
 // Global settings
@@ -113,7 +115,11 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
                 .map_err(|_| WkError::BadArg(format!("invalid load.jsdelay: {value:?}")))?;
         }
         "load.proxy" => {
-            g.proxy = if value.is_empty() { None } else { Some(value.to_string()) };
+            g.proxy = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
         }
         "load.blockLocalFileAccess" => {
             g.allow_local_file_access = !parse_bool(value)?;
@@ -287,12 +293,8 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
         "produceForms" => o.produce_forms = parse_bool(value)?,
 
         // ── TOC sub-settings (partially recognised) ───────────────────────
-        "toc.useDottedLines"
-        | "toc.captionText"
-        | "toc.forwardLinks"
-        | "toc.backLinks"
-        | "toc.indentation"
-        | "toc.fontScale" => {
+        "toc.useDottedLines" | "toc.captionText" | "toc.forwardLinks" | "toc.backLinks"
+        | "toc.indentation" | "toc.fontScale" => {
             o.warnings.push(format!(
                 "setting {name:?} is recognised but not yet implemented in this engine; ignored"
             ));
@@ -563,29 +565,43 @@ pub fn set_image_global(g: &mut ImageGlobalSettings, name: &str, value: &str) ->
     match name {
         // ── input / output ────────────────────────────────────────────────
         "in" => {
-            g.in_path = if value.is_empty() { None } else { Some(value.to_string()) };
+            g.in_path = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
         }
         "out" => {
-            g.out = if value.is_empty() { None } else { Some(value.to_string()) };
+            g.out = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
         }
         "fmt" => {
             g.fmt = value.to_ascii_lowercase();
         }
         "quality" => {
-            g.quality = value.trim().parse::<u8>()
+            g.quality = value
+                .trim()
+                .parse::<u8>()
                 .map_err(|_| WkError::BadArg(format!("invalid quality: {value:?}")))?;
         }
 
         // ── viewport / layout ─────────────────────────────────────────────
         "screenWidth" => {
             g.screen_width = Some(
-                value.trim().parse::<u32>()
+                value
+                    .trim()
+                    .parse::<u32>()
                     .map_err(|_| WkError::BadArg(format!("invalid screenWidth: {value:?}")))?,
             );
         }
         "screenHeight" => {
             g.screen_height = Some(
-                value.trim().parse::<u32>()
+                value
+                    .trim()
+                    .parse::<u32>()
                     .map_err(|_| WkError::BadArg(format!("invalid screenHeight: {value:?}")))?,
             );
         }
@@ -593,32 +609,42 @@ pub fn set_image_global(g: &mut ImageGlobalSettings, name: &str, value: &str) ->
             g.smart_width = parse_bool(value)?;
         }
         "zoom" | "load.zoomFactor" | "loadPage.zoomFactor" => {
-            g.zoom = value.trim().parse::<f64>()
+            g.zoom = value
+                .trim()
+                .parse::<f64>()
                 .map_err(|_| WkError::BadArg(format!("invalid zoom: {value:?}")))?;
         }
 
         // ── crop ──────────────────────────────────────────────────────────
         "crop.left" => {
             g.crop_x = Some(
-                value.trim().parse::<u32>()
+                value
+                    .trim()
+                    .parse::<u32>()
                     .map_err(|_| WkError::BadArg(format!("invalid crop.left: {value:?}")))?,
             );
         }
         "crop.top" => {
             g.crop_y = Some(
-                value.trim().parse::<u32>()
+                value
+                    .trim()
+                    .parse::<u32>()
                     .map_err(|_| WkError::BadArg(format!("invalid crop.top: {value:?}")))?,
             );
         }
         "crop.width" => {
             g.crop_w = Some(
-                value.trim().parse::<u32>()
+                value
+                    .trim()
+                    .parse::<u32>()
                     .map_err(|_| WkError::BadArg(format!("invalid crop.width: {value:?}")))?,
             );
         }
         "crop.height" => {
             g.crop_h = Some(
-                value.trim().parse::<u32>()
+                value
+                    .trim()
+                    .parse::<u32>()
                     .map_err(|_| WkError::BadArg(format!("invalid crop.height: {value:?}")))?,
             );
         }
@@ -636,11 +662,17 @@ pub fn set_image_global(g: &mut ImageGlobalSettings, name: &str, value: &str) ->
 
         // ── load (canonical + loadPage.* aliases) ─────────────────────────
         "load.jsdelay" | "loadPage.jsdelay" => {
-            g.javascript_delay_ms = value.trim().parse::<u64>()
+            g.javascript_delay_ms = value
+                .trim()
+                .parse::<u64>()
                 .map_err(|_| WkError::BadArg(format!("invalid jsdelay: {value:?}")))?;
         }
         "load.proxy" | "loadPage.proxy" => {
-            g.proxy = if value.is_empty() { None } else { Some(value.to_string()) };
+            g.proxy = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
         }
         "load.blockLocalFileAccess" | "loadPage.blockLocalFileAccess" => {
             g.allow_local_file_access = !parse_bool(value)?;
@@ -702,7 +734,7 @@ pub fn set_image_global(g: &mut ImageGlobalSettings, name: &str, value: &str) ->
 pub fn get_image_global(g: &ImageGlobalSettings, name: &str) -> Option<String> {
     let v: String = match name {
         // ── input / output ────────────────────────────────────────────────
-        "in"  => g.in_path.clone().unwrap_or_default(),
+        "in" => g.in_path.clone().unwrap_or_default(),
         "out" => g.out.clone().unwrap_or_default(),
         "fmt" => g.fmt.clone(),
         "quality" => g.quality.to_string(),
@@ -714,9 +746,9 @@ pub fn get_image_global(g: &ImageGlobalSettings, name: &str) -> Option<String> {
         "zoom" | "load.zoomFactor" | "loadPage.zoomFactor" => g.zoom.to_string(),
 
         // ── crop ──────────────────────────────────────────────────────────
-        "crop.left"   => g.crop_x.map(|v| v.to_string()).unwrap_or_default(),
-        "crop.top"    => g.crop_y.map(|v| v.to_string()).unwrap_or_default(),
-        "crop.width"  => g.crop_w.map(|v| v.to_string()).unwrap_or_default(),
+        "crop.left" => g.crop_x.map(|v| v.to_string()).unwrap_or_default(),
+        "crop.top" => g.crop_y.map(|v| v.to_string()).unwrap_or_default(),
+        "crop.width" => g.crop_w.map(|v| v.to_string()).unwrap_or_default(),
         "crop.height" => g.crop_h.map(|v| v.to_string()).unwrap_or_default(),
 
         // ── transparency ──────────────────────────────────────────────────
@@ -724,13 +756,13 @@ pub fn get_image_global(g: &ImageGlobalSettings, name: &str) -> Option<String> {
 
         // ── web rendering ─────────────────────────────────────────────────
         "web.enableJavascript" => g.enable_javascript.to_string(),
-        "web.printMediaType"   => g.print_media_type.to_string(),
-        "web.background"       => g.print_background.to_string(),
-        "web.loadImages"       => g.load_images.to_string(),
+        "web.printMediaType" => g.print_media_type.to_string(),
+        "web.background" => g.print_background.to_string(),
+        "web.loadImages" => g.load_images.to_string(),
 
         // ── load ──────────────────────────────────────────────────────────
         "load.jsdelay" | "loadPage.jsdelay" => g.javascript_delay_ms.to_string(),
-        "load.proxy"   | "loadPage.proxy"   => g.proxy.clone().unwrap_or_default(),
+        "load.proxy" | "loadPage.proxy" => g.proxy.clone().unwrap_or_default(),
         "load.blockLocalFileAccess" | "loadPage.blockLocalFileAccess" => {
             (!g.allow_local_file_access).to_string()
         }
@@ -739,10 +771,10 @@ pub fn get_image_global(g: &ImageGlobalSettings, name: &str) -> Option<String> {
         "load.noCheckCertificate" => g.no_check_certificate.to_string(),
 
         // ── security policy ───────────────────────────────────────────────
-        "load.safe"                  => g.safe_mode.to_string(),
-        "load.allowedPath"           => g.allowed_paths.join(","),
-        "load.disableExternalLinks"  => g.block_external_links.to_string(),
-        "load.disableInternalLinks"  => g.block_internal_links.to_string(),
+        "load.safe" => g.safe_mode.to_string(),
+        "load.allowedPath" => g.allowed_paths.join(","),
+        "load.disableExternalLinks" => g.block_external_links.to_string(),
+        "load.disableInternalLinks" => g.block_internal_links.to_string(),
 
         // ── recognised-but-unimplemented → empty default ──────────────────
         "logLevel"
@@ -1028,7 +1060,10 @@ mod tests {
     fn get_object_page_roundtrip() {
         let mut o = PdfObjectSettings::default();
         set_object(&mut o, "page", "https://example.com").unwrap();
-        assert_eq!(get_object(&o, "page"), Some("https://example.com".to_owned()));
+        assert_eq!(
+            get_object(&o, "page"),
+            Some("https://example.com".to_owned())
+        );
     }
 
     #[test]
@@ -1110,7 +1145,10 @@ mod tests {
         let mut g = ImageGlobalSettings::default();
         set_image_global(&mut g, "in", "https://example.com").unwrap();
         assert_eq!(g.in_path, Some("https://example.com".to_owned()));
-        assert_eq!(get_image_global(&g, "in"), Some("https://example.com".to_owned()));
+        assert_eq!(
+            get_image_global(&g, "in"),
+            Some("https://example.com".to_owned())
+        );
 
         set_image_global(&mut g, "in", "").unwrap(); // clear
         assert_eq!(g.in_path, None);

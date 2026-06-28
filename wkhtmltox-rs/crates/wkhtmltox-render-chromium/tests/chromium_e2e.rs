@@ -1,15 +1,40 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
 use wkhtmltox_core::render::*;
-use wkhtmltox_render_chromium::renderer::{ChromiumRenderer, FetchDecision, fetch_action};
+use wkhtmltox_render_chromium::renderer::{fetch_action, ChromiumRenderer, FetchDecision};
 
 #[test]
 #[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
 fn snapshot_honors_screen_width_via_device_metrics() {
     let mut r = ChromiumRenderer::spawn().unwrap();
-    let load = LoadSettings { device_metrics: Some(DeviceMetrics { width: 800, height: 0, device_scale_factor: 1.0, smart_width: false }), ..Default::default() };
-    let p = r.open(&Source::Html("<html><body style='margin:0'><div style='width:100%'>x</div></body></html>".into()), &load).unwrap();
+    let load = LoadSettings {
+        device_metrics: Some(DeviceMetrics {
+            width: 800,
+            height: 0,
+            device_scale_factor: 1.0,
+            smart_width: false,
+        }),
+        ..Default::default()
+    };
+    let p = r
+        .open(
+            &Source::Html(
+                "<html><body style='margin:0'><div style='width:100%'>x</div></body></html>".into(),
+            ),
+            &load,
+        )
+        .unwrap();
     r.wait_ready(p, &ReadyPolicy::default()).unwrap();
-    let raw = r.snapshot(p, &SnapshotOpts { format: ImageFormat::Png, crop: None, scale: 1.0, quality: 90 }).unwrap();
+    let raw = r
+        .snapshot(
+            p,
+            &SnapshotOpts {
+                format: ImageFormat::Png,
+                crop: None,
+                scale: 1.0,
+                quality: 90,
+            },
+        )
+        .unwrap();
     let img = ::image::load_from_memory(&raw.bytes).unwrap();
     let w = img.width();
     assert!((w as i64 - 800).abs() <= 2, "width ~800, got {w}");
@@ -21,17 +46,31 @@ fn renders_paginated_pdf_with_outline() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/toc.html");
     let url = format!("file://{path}");
     let mut r = ChromiumRenderer::spawn().expect("spawn chrome");
-    let p = r.open(&Source::Url(url), &LoadSettings { enable_javascript: true, ..Default::default() }).unwrap();
+    let p = r
+        .open(
+            &Source::Url(url),
+            &LoadSettings {
+                enable_javascript: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
     r.wait_ready(p, &ReadyPolicy::default()).unwrap();
     let pdf = r.print_pdf(p, &PageGeometry::default()).unwrap();
     assert!(pdf.starts_with(b"%PDF"), "not a pdf");
 
     let doc = lopdf::Document::load_mem(&pdf).expect("parse pdf");
     let pages = doc.get_pages().len();
-    assert!(pages >= 3, "expected >=3 pages from forced breaks, got {pages}");
+    assert!(
+        pages >= 3,
+        "expected >=3 pages from forced breaks, got {pages}"
+    );
     // generateDocumentOutline must yield a catalog /Outlines entry
     let catalog = doc.catalog().expect("catalog");
-    assert!(catalog.get(b"Outlines").is_ok(), "no /Outlines (generateDocumentOutline failed)");
+    assert!(
+        catalog.get(b"Outlines").is_ok(),
+        "no /Outlines (generateDocumentOutline failed)"
+    );
 }
 
 /// Verify that the `FetchDecision` enum and `fetch_action` helper are exported
@@ -51,12 +90,20 @@ fn fetch_action_exported_and_correct() {
     );
     // Safe profile: private IP → Fail.
     assert_eq!(
-        fetch_action(&ResourcePolicy::safe_profile(), "http://127.0.0.1:1/", false),
+        fetch_action(
+            &ResourcePolicy::safe_profile(),
+            "http://127.0.0.1:1/",
+            false
+        ),
         FetchDecision::Fail
     );
     // Safe profile: public HTTPS → Continue.
     assert_eq!(
-        fetch_action(&ResourcePolicy::safe_profile(), "https://example.com/", false),
+        fetch_action(
+            &ResourcePolicy::safe_profile(),
+            "https://example.com/",
+            false
+        ),
         FetchDecision::Continue
     );
 }
@@ -79,12 +126,19 @@ fn networking_settings_accepted_headers_and_auth() {
         ..Default::default()
     };
     // data: URL — no network required; the CDP networking calls are the point.
-    let p = r.open(
-        &Source::Url("data:text/html,<html><body><h1>Networking Test</h1></body></html>".into()),
-        &load,
-    ).expect("open must succeed with networking settings applied");
-    r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready must succeed");
-    let pdf = r.print_pdf(p, &PageGeometry::default()).expect("print_pdf must succeed");
+    let p = r
+        .open(
+            &Source::Url(
+                "data:text/html,<html><body><h1>Networking Test</h1></body></html>".into(),
+            ),
+            &load,
+        )
+        .expect("open must succeed with networking settings applied");
+    r.wait_ready(p, &ReadyPolicy::default())
+        .expect("wait_ready must succeed");
+    let pdf = r
+        .print_pdf(p, &PageGeometry::default())
+        .expect("print_pdf must succeed");
     assert!(pdf.starts_with(b"%PDF"), "output must be a valid PDF");
 }
 
@@ -98,9 +152,11 @@ fn networking_settings_accepted_headers_and_auth() {
 #[test]
 #[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
 fn respawn_back_to_back() {
-    const HTML: &str =
-        "data:text/html,<html><body><h1>Respawn test</h1></body></html>";
-    let load = LoadSettings { enable_javascript: false, ..Default::default() };
+    const HTML: &str = "data:text/html,<html><body><h1>Respawn test</h1></body></html>";
+    let load = LoadSettings {
+        enable_javascript: false,
+        ..Default::default()
+    };
 
     for round in 0..3 {
         // ── First renderer ────────────────────────────────────────────────────
@@ -248,16 +304,27 @@ fn forms_become_acroform_fields() {
                 <input type='text' name='email'>\
                 <textarea name='note'></textarea>\
                 </form></body></html>";
-    let opts = AssembleOpts { produce_forms: true, ..Default::default() };
+    let opts = AssembleOpts {
+        produce_forms: true,
+        ..Default::default()
+    };
 
     let tmp = tempfile::NamedTempFile::new().expect("create temp output file");
-    assemble_pdf(&mut r, &[Source::Html(html.into())], &PageGeometry::default(), tmp.path(), &opts)
-        .expect("assemble_pdf must succeed");
+    assemble_pdf(
+        &mut r,
+        &[Source::Html(html.into())],
+        &PageGeometry::default(),
+        tmp.path(),
+        &opts,
+    )
+    .expect("assemble_pdf must succeed");
 
     let pdf = std::fs::read(tmp.path()).expect("read output pdf");
     let doc = lopdf::Document::load_mem(&pdf).expect("parse output pdf");
     let cat = doc.catalog().expect("catalog");
-    let acro = cat.get(b"AcroForm").expect("no /AcroForm — forms not produced");
+    let acro = cat
+        .get(b"AcroForm")
+        .expect("no /AcroForm — forms not produced");
     // Dereference if stored as indirect reference.
     let acro = acro
         .as_reference()
@@ -281,25 +348,32 @@ fn forms_become_acroform_fields() {
 #[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
 fn snapshot_data_url_returns_valid_png() {
     let mut r = ChromiumRenderer::spawn().expect("spawn chrome");
-    let load = LoadSettings { enable_javascript: false, ..Default::default() };
-    let p = r.open(
-        &Source::Url(
-            "data:text/html,<html><body style='background:red'><h1>Snapshot</h1></body></html>"
-                .into(),
-        ),
-        &load,
-    )
-    .expect("open");
-    r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready");
+    let load = LoadSettings {
+        enable_javascript: false,
+        ..Default::default()
+    };
+    let p = r
+        .open(
+            &Source::Url(
+                "data:text/html,<html><body style='background:red'><h1>Snapshot</h1></body></html>"
+                    .into(),
+            ),
+            &load,
+        )
+        .expect("open");
+    r.wait_ready(p, &ReadyPolicy::default())
+        .expect("wait_ready");
 
-    let raw = r.snapshot(p, &SnapshotOpts::default()).expect("snapshot must succeed");
+    let raw = r
+        .snapshot(p, &SnapshotOpts::default())
+        .expect("snapshot must succeed");
 
     // PNG magic header.
     assert_eq!(&raw.bytes[..4], b"\x89PNG", "snapshot must return a PNG");
 
     // Decode with the image crate and verify dims > 0.
     let decoded = ::image::load_from_memory(&raw.bytes).expect("PNG must decode");
-    assert!(decoded.width() > 0,  "snapshot width must be > 0");
+    assert!(decoded.width() > 0, "snapshot width must be > 0");
     assert!(decoded.height() > 0, "snapshot height must be > 0");
 }
 
@@ -334,7 +408,8 @@ fn snapshot_under_safe_policy_blocks_private_ip_subresource() {
 
     let mut r = ChromiumRenderer::spawn().expect("spawn chrome");
     let p = r.open(&Source::Url(html.into()), &load).expect("open");
-    r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready");
+    r.wait_ready(p, &ReadyPolicy::default())
+        .expect("wait_ready");
 
     // Snapshot must succeed even though a subresource was blocked.
     let raw = r
@@ -343,7 +418,10 @@ fn snapshot_under_safe_policy_blocks_private_ip_subresource() {
 
     assert_eq!(&raw.bytes[..4], b"\x89PNG", "snapshot must return PNG");
     let decoded = ::image::load_from_memory(&raw.bytes).expect("PNG must decode");
-    assert!(decoded.width() > 0 && decoded.height() > 0, "dims must be > 0");
+    assert!(
+        decoded.width() > 0 && decoded.height() > 0,
+        "dims must be > 0"
+    );
 
     // The private-IP image must have been blocked by the policy.
     let blocked = r.blocked_urls();
@@ -393,10 +471,11 @@ fn policy_enforcement_blocks_ssrf_and_local_files() {
 <p>ResourcePolicy enforcement test</p>
 </body>
 </html>"#
-    ).expect("write html");
+    )
+    .expect("write html");
     tmp.flush().expect("flush");
     let main_path = tmp.path().to_str().expect("utf8 path").to_string();
-    let main_url  = format!("file://{main_path}");
+    let main_url = format!("file://{main_path}");
 
     // ── Default (permissive) policy ──────────────────────────────────────────
     {
@@ -407,13 +486,19 @@ fn policy_enforcement_blocks_ssrf_and_local_files() {
             policy: ResourcePolicy::default(),
             ..Default::default()
         };
-        let p = r.open(&Source::Url(main_url.clone()), &load)
+        let p = r
+            .open(&Source::Url(main_url.clone()), &load)
             .expect("open [default policy]");
-        r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready [default policy]");
-        let pdf = r.print_pdf(p, &PageGeometry::default())
+        r.wait_ready(p, &ReadyPolicy::default())
+            .expect("wait_ready [default policy]");
+        let pdf = r
+            .print_pdf(p, &PageGeometry::default())
             .expect("print_pdf [default policy]");
 
-        assert!(pdf.starts_with(b"%PDF"), "default policy: output must be PDF");
+        assert!(
+            pdf.starts_with(b"%PDF"),
+            "default policy: output must be PDF"
+        );
 
         let blocked = r.blocked_urls();
         assert!(
@@ -444,13 +529,19 @@ fn policy_enforcement_blocks_ssrf_and_local_files() {
             policy,
             ..Default::default()
         };
-        let p = r.open(&Source::Url(main_url.clone()), &load)
+        let p = r
+            .open(&Source::Url(main_url.clone()), &load)
             .expect("open [safe policy]");
-        r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready [safe policy]");
-        let pdf = r.print_pdf(p, &PageGeometry::default())
+        r.wait_ready(p, &ReadyPolicy::default())
+            .expect("wait_ready [safe policy]");
+        let pdf = r
+            .print_pdf(p, &PageGeometry::default())
             .expect("print_pdf [safe policy]");
 
-        assert!(pdf.starts_with(b"%PDF"), "safe policy: output must still be PDF");
+        assert!(
+            pdf.starts_with(b"%PDF"),
+            "safe policy: output must still be PDF"
+        );
 
         let blocked = r.blocked_urls();
         assert!(

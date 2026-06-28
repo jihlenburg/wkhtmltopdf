@@ -125,8 +125,7 @@ pub fn assemble_pdf(
 
     // Render cover page first (before the TOC/non-TOC dispatch) so that both
     // paths share the same rendered cover artefact and cover_pages value.
-    let (cover_path_opt, cover_pages) =
-        render_cover(r, geom, work.path(), opts)?;
+    let (cover_path_opt, cover_pages) = render_cover(r, geom, work.path(), opts)?;
 
     // ── TOC path ──────────────────────────────────────────────────────────────
     if opts.with_toc {
@@ -285,8 +284,7 @@ pub fn assemble_pdf(
     // Note: the cover contributes no bookmark entries — its pages are skipped.
     let after_outline = if !outline_items.is_empty() {
         let outlined = work.path().join("outlined.pdf");
-        wkhtmltox_pdf_sys::set_outline(&merged, &outlined, &outline_items)
-            .map_err(WkError::Pdf)?;
+        wkhtmltox_pdf_sys::set_outline(&merged, &outlined, &outline_items).map_err(WkError::Pdf)?;
         outlined
     } else {
         merged
@@ -312,8 +310,7 @@ pub fn assemble_pdf(
     // numbered from 1 with [topage] = total_pages - cover_pages.
     let final_path = if has_cells {
         let stamped = work.path().join("cells.pdf");
-        let cell_strings =
-            build_cell_strings(opts, &outline_items, total_pages, cover_pages);
+        let cell_strings = build_cell_strings(opts, &outline_items, total_pages, cover_pages);
         wkhtmltox_pdf_sys::stamp_cells(
             &before_cells,
             &stamped,
@@ -340,8 +337,7 @@ pub fn assemble_pdf(
     let pre_link = final_path;
     let after_links = if !link_annots.is_empty() {
         let linked = work.path().join("linked.pdf");
-        wkhtmltox_pdf_sys::add_links(&pre_link, &linked, &link_annots)
-            .map_err(WkError::Pdf)?;
+        wkhtmltox_pdf_sys::add_links(&pre_link, &linked, &link_annots).map_err(WkError::Pdf)?;
         linked
     } else {
         pre_link
@@ -353,8 +349,8 @@ pub fn assemble_pdf(
     let copy_src = if !field_specs.is_empty() {
         let with_forms = work.path().join("with_forms.pdf");
         let pdf_bytes = std::fs::read(&after_links).map_err(|e| WkError::Io(e.to_string()))?;
-        let new_bytes = wkhtmltox_pdf_sys::add_text_fields(&pdf_bytes, &field_specs)
-            .map_err(WkError::Pdf)?;
+        let new_bytes =
+            wkhtmltox_pdf_sys::add_text_fields(&pdf_bytes, &field_specs).map_err(WkError::Pdf)?;
         std::fs::write(&with_forms, &new_bytes).map_err(|e| WkError::Io(e.to_string()))?;
         with_forms
     } else {
@@ -444,7 +440,11 @@ fn assemble_with_toc(
                 .collect()
         };
 
-        content_parts.push(ContentPart { path: part, page_count, local_outline });
+        content_parts.push(ContentPart {
+            path: part,
+            page_count,
+            local_outline,
+        });
     }
 
     // ── Phase 2: fixed-point TOC page-count stabilisation ─────────────────────
@@ -539,8 +539,7 @@ fn assemble_with_toc(
 
     let after_outline = if !all_outline.is_empty() {
         let outlined = work.join("outlined.pdf");
-        wkhtmltox_pdf_sys::set_outline(&merged, &outlined, &all_outline)
-            .map_err(WkError::Pdf)?;
+        wkhtmltox_pdf_sys::set_outline(&merged, &outlined, &all_outline).map_err(WkError::Pdf)?;
         outlined
     } else {
         merged
@@ -561,8 +560,7 @@ fn assemble_with_toc(
     // Cover pages receive all-empty cells; non-cover pages numbered from 1.
     let final_path = if has_cells {
         let stamped = work.join("cells.pdf");
-        let cell_strings =
-            build_cell_strings(opts, &all_outline, total_pages, cover_pages);
+        let cell_strings = build_cell_strings(opts, &all_outline, total_pages, cover_pages);
         wkhtmltox_pdf_sys::stamp_cells(
             &before_cells,
             &stamped,

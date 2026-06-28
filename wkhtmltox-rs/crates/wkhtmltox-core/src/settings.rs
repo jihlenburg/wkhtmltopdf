@@ -378,10 +378,7 @@ impl GlobalSettings {
             (None, Some(_)) => self.footer.font_size,
             (None, None) => 9.0,
         };
-        let cover = self
-            .cover
-            .as_ref()
-            .map(|url| Source::Url(url.clone()));
+        let cover = self.cover.as_ref().map(|url| Source::Url(url.clone()));
         AssembleOpts {
             number: false,
             with_toc: self.produce_toc,
@@ -424,8 +421,16 @@ impl GlobalSettings {
         crate::render::LoadSettings {
             cookies: self.cookies.clone(),
             custom_headers: self.custom_headers.clone(),
-            username: if self.username.is_empty() { None } else { Some(self.username.clone()) },
-            password: if self.password.is_empty() { None } else { Some(self.password.clone()) },
+            username: if self.username.is_empty() {
+                None
+            } else {
+                Some(self.username.clone())
+            },
+            password: if self.password.is_empty() {
+                None
+            } else {
+                Some(self.password.clone())
+            },
             proxy: self.proxy.clone(),
             no_check_certificate: self.no_check_certificate,
             enable_javascript: self.enable_javascript,
@@ -555,12 +560,12 @@ pub struct ImageGlobalSettings {
     pub transparent: bool,
 
     // --- Web rendering ---------------------------------------------------
-    pub enable_javascript: bool,    // "web.enableJavascript"
-    pub print_media_type: bool,     // "web.printMediaType"
-    pub print_background: bool,     // "web.background"
+    pub enable_javascript: bool, // "web.enableJavascript"
+    pub print_media_type: bool,  // "web.printMediaType"
+    pub print_background: bool,  // "web.background"
     /// When `false`, all image resources are blocked (`"web.loadImages"` /
     /// `--no-images`).  Default `true` (permissive).
-    pub load_images: bool,          // "web.loadImages"
+    pub load_images: bool, // "web.loadImages"
 
     // --- Load settings ---------------------------------------------------
     /// JavaScript delay in milliseconds (`"load.jsdelay"`).
@@ -651,7 +656,7 @@ impl ImageGlobalSettings {
         };
         crate::image::ImageOpts {
             format,
-            width: None,   // post-capture resize not driven by settings (use screen_width for viewport)
+            width: None, // post-capture resize not driven by settings (use screen_width for viewport)
             height: None,
             quality: self.quality,
             transparent: self.transparent,
@@ -684,25 +689,31 @@ impl ImageGlobalSettings {
         };
 
         // Populate device_metrics when any viewport/zoom setting is non-trivial.
-        let device_metrics = if self.zoom != 1.0
-            || self.screen_width.is_some()
-            || self.screen_height.is_some()
-        {
-            Some(DeviceMetrics {
-                width: self.screen_width.unwrap_or(0),
-                height: self.screen_height.unwrap_or(0),
-                device_scale_factor: if self.zoom > 0.0 { self.zoom } else { 1.0 },
-                smart_width: self.smart_width,
-            })
-        } else {
-            None
-        };
+        let device_metrics =
+            if self.zoom != 1.0 || self.screen_width.is_some() || self.screen_height.is_some() {
+                Some(DeviceMetrics {
+                    width: self.screen_width.unwrap_or(0),
+                    height: self.screen_height.unwrap_or(0),
+                    device_scale_factor: if self.zoom > 0.0 { self.zoom } else { 1.0 },
+                    smart_width: self.smart_width,
+                })
+            } else {
+                None
+            };
 
         crate::render::LoadSettings {
             cookies: self.cookies.clone(),
             custom_headers: self.custom_headers.clone(),
-            username: if self.username.is_empty() { None } else { Some(self.username.clone()) },
-            password: if self.password.is_empty() { None } else { Some(self.password.clone()) },
+            username: if self.username.is_empty() {
+                None
+            } else {
+                Some(self.username.clone())
+            },
+            password: if self.password.is_empty() {
+                None
+            } else {
+                Some(self.password.clone())
+            },
             proxy: self.proxy.clone(),
             no_check_certificate: self.no_check_certificate,
             enable_javascript: self.enable_javascript,
@@ -744,9 +755,9 @@ pub fn parse_length_mm(s: &str) -> Result<f64> {
     let num_str = &s[..num_end];
     let unit = s[num_end..].trim().to_ascii_lowercase();
 
-    let value: f64 = num_str.parse().map_err(|_| {
-        WkError::BadArg(format!("invalid length: {s:?}"))
-    })?;
+    let value: f64 = num_str
+        .parse()
+        .map_err(|_| WkError::BadArg(format!("invalid length: {s:?}")))?;
 
     let mm = match unit.as_str() {
         "" | "mm" | "millimeter" | "millimeters" => value,
@@ -938,9 +949,16 @@ mod tests {
 
     #[test]
     fn image_settings_forward_zoom_and_screen_width_to_device_metrics() {
-        let g = ImageGlobalSettings { zoom: 2.0, screen_width: Some(800), smart_width: false, ..Default::default() };
+        let g = ImageGlobalSettings {
+            zoom: 2.0,
+            screen_width: Some(800),
+            smart_width: false,
+            ..Default::default()
+        };
         let ls = g.to_load_settings();
-        let dm = ls.device_metrics.expect("device_metrics set when zoom/width given");
+        let dm = ls
+            .device_metrics
+            .expect("device_metrics set when zoom/width given");
         assert_eq!(dm.width, 800);
         assert!((dm.device_scale_factor - 2.0).abs() < 1e-9);
         assert!(!dm.smart_width);

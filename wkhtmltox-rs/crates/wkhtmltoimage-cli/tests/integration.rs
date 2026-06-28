@@ -20,8 +20,11 @@ fn gated_render_html_to_png() {
     let dir = tempfile::tempdir().expect("tempdir");
     let in_path = dir.path().join("test.html");
     let out_path = dir.path().join("out.png");
-    std::fs::write(&in_path, b"<html><body><p>hello wkhtmltoimage</p></body></html>")
-        .expect("write html");
+    std::fs::write(
+        &in_path,
+        b"<html><body><p>hello wkhtmltoimage</p></body></html>",
+    )
+    .expect("write html");
 
     let status = Command::new(BIN)
         .args([
@@ -32,11 +35,18 @@ fn gated_render_html_to_png() {
         .status()
         .expect("spawn wkhtmltoimage");
 
-    assert!(status.success(), "wkhtmltoimage should exit 0, got: {status:?}");
+    assert!(
+        status.success(),
+        "wkhtmltoimage should exit 0, got: {status:?}"
+    );
 
     let bytes = std::fs::read(&out_path).expect("read output png");
     assert!(bytes.len() > 8, "output must be larger than 8 bytes");
-    assert_eq!(&bytes[..4], b"\x89PNG", "output must start with PNG magic bytes");
+    assert_eq!(
+        &bytes[..4],
+        b"\x89PNG",
+        "output must start with PNG magic bytes"
+    );
 }
 
 /// --version exits 0.
@@ -60,7 +70,10 @@ fn gated_unknown_flag_exits_nonzero() {
         .status()
         .expect("spawn wkhtmltoimage --frobnicate");
 
-    assert!(!status.success(), "--frobnicate should exit nonzero, got: {status:?}");
+    assert!(
+        !status.success(),
+        "--frobnicate should exit nonzero, got: {status:?}"
+    );
 }
 
 /// Missing input file exits nonzero.
@@ -79,5 +92,8 @@ fn gated_missing_input_exits_nonzero() {
         .status()
         .expect("spawn wkhtmltoimage with missing input");
 
-    assert!(!status.success(), "missing input should exit nonzero, got: {status:?}");
+    assert!(
+        !status.success(),
+        "missing input should exit nonzero, got: {status:?}"
+    );
 }

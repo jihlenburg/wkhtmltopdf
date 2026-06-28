@@ -11,11 +11,8 @@ fn nested_outline_bookmarks() {
     common::write_min_pdf(inp.to_str().unwrap(), 3);
 
     // Set nested outline: A (level 1, page 0), A.1 (level 2, page 0), B (level 1, page 2).
-    let items: Vec<(String, u32, u8)> = vec![
-        ("A".into(), 0, 1),
-        ("A.1".into(), 0, 2),
-        ("B".into(), 2, 1),
-    ];
+    let items: Vec<(String, u32, u8)> =
+        vec![("A".into(), 0, 1), ("A.1".into(), 0, 2), ("B".into(), 2, 1)];
     wkhtmltox_pdf_sys::set_outline(&inp, &outp, &items).expect("set_outline");
 
     // Verify the output via lopdf.
@@ -80,7 +77,11 @@ fn nested_outline_bookmarks() {
         lopdf::Object::String(bytes, _) => bytes.clone(),
         _ => panic!("A.1 /Title must be a string object"),
     };
-    assert_eq!(pdf_string_to_str(&title_a1_bytes), "A.1", "child of A should be 'A.1'");
+    assert_eq!(
+        pdf_string_to_str(&title_a1_bytes),
+        "A.1",
+        "child of A should be 'A.1'"
+    );
 
     // Follow A's /Next to get item B.
     let a_next_ref = item_a
@@ -98,7 +99,11 @@ fn nested_outline_bookmarks() {
         lopdf::Object::String(bytes, _) => bytes.clone(),
         _ => panic!("B /Title must be a string object"),
     };
-    assert_eq!(pdf_string_to_str(&title_b_bytes), "B", "second top-level item should be 'B'");
+    assert_eq!(
+        pdf_string_to_str(&title_b_bytes),
+        "B",
+        "second top-level item should be 'B'"
+    );
 
     // B's /Dest first element must resolve to the 3rd page (index 2).
     let b_dest = item_b
@@ -107,7 +112,9 @@ fn nested_outline_bookmarks() {
         .as_array()
         .expect("/Dest must be an array");
     assert!(!b_dest.is_empty(), "/Dest must be non-empty");
-    let page3_ref = b_dest[0].as_reference().expect("/Dest[0] must be a page ref");
+    let page3_ref = b_dest[0]
+        .as_reference()
+        .expect("/Dest[0] must be a page ref");
 
     // The 3rd page (0-based index 2) — get the page ids in order.
     let pages = doc.get_pages();

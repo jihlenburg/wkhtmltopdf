@@ -78,37 +78,107 @@ struct FlagSpec {
 
 static FLAGS: &[FlagSpec] = &[
     // ── Info / meta ──────────────────────────────────────────────────────────
-    FlagSpec { long: "help",    short: Some('h'), action: Action::Special(SpecialKind::Help)    },
-    FlagSpec { long: "version", short: Some('V'), action: Action::Special(SpecialKind::Version) },
-    FlagSpec { long: "quiet",   short: Some('q'), action: Action::Special(SpecialKind::Quiet)   },
-
+    FlagSpec {
+        long: "help",
+        short: Some('h'),
+        action: Action::Special(SpecialKind::Help),
+    },
+    FlagSpec {
+        long: "version",
+        short: Some('V'),
+        action: Action::Special(SpecialKind::Version),
+    },
+    FlagSpec {
+        long: "quiet",
+        short: Some('q'),
+        action: Action::Special(SpecialKind::Quiet),
+    },
     // ── Format / quality ─────────────────────────────────────────────────────
-    FlagSpec { long: "format",  short: Some('f'), action: Action::Setting("fmt")     },
-    FlagSpec { long: "quality", short: None,      action: Action::Setting("quality") },
-
+    FlagSpec {
+        long: "format",
+        short: Some('f'),
+        action: Action::Setting("fmt"),
+    },
+    FlagSpec {
+        long: "quality",
+        short: None,
+        action: Action::Setting("quality"),
+    },
     // ── Viewport dimensions ───────────────────────────────────────────────────
-    FlagSpec { long: "width",  short: Some('w'), action: Action::Setting("screenWidth")  },
-    FlagSpec { long: "height", short: None,      action: Action::Setting("screenHeight") },
-
+    FlagSpec {
+        long: "width",
+        short: Some('w'),
+        action: Action::Setting("screenWidth"),
+    },
+    FlagSpec {
+        long: "height",
+        short: None,
+        action: Action::Setting("screenHeight"),
+    },
     // ── Crop ─────────────────────────────────────────────────────────────────
-    FlagSpec { long: "crop-x", short: None, action: Action::Setting("crop.left")   },
-    FlagSpec { long: "crop-y", short: None, action: Action::Setting("crop.top")    },
-    FlagSpec { long: "crop-w", short: None, action: Action::Setting("crop.width")  },
-    FlagSpec { long: "crop-h", short: None, action: Action::Setting("crop.height") },
-
+    FlagSpec {
+        long: "crop-x",
+        short: None,
+        action: Action::Setting("crop.left"),
+    },
+    FlagSpec {
+        long: "crop-y",
+        short: None,
+        action: Action::Setting("crop.top"),
+    },
+    FlagSpec {
+        long: "crop-w",
+        short: None,
+        action: Action::Setting("crop.width"),
+    },
+    FlagSpec {
+        long: "crop-h",
+        short: None,
+        action: Action::Setting("crop.height"),
+    },
     // ── Appearance ───────────────────────────────────────────────────────────
-    FlagSpec { long: "transparent", short: None, action: Action::Special(SpecialKind::TransparentOn) },
-    FlagSpec { long: "zoom",        short: None, action: Action::Setting("zoom")    },
-
+    FlagSpec {
+        long: "transparent",
+        short: None,
+        action: Action::Special(SpecialKind::TransparentOn),
+    },
+    FlagSpec {
+        long: "zoom",
+        short: None,
+        action: Action::Setting("zoom"),
+    },
     // ── Load / security ──────────────────────────────────────────────────────
-    FlagSpec { long: "enable-local-file-access",  short: None, action: Action::Const("load.blockLocalFileAccess", "false") },
-    FlagSpec { long: "disable-local-file-access", short: None, action: Action::Const("load.blockLocalFileAccess", "true")  },
-    FlagSpec { long: "allow",                     short: None, action: Action::Setting("load.allowedPath") },
-    FlagSpec { long: "safe",                      short: None, action: Action::Const("load.safe", "true") },
-    FlagSpec { long: "javascript-delay",          short: None, action: Action::Setting("load.jsdelay")    },
-
+    FlagSpec {
+        long: "enable-local-file-access",
+        short: None,
+        action: Action::Const("load.blockLocalFileAccess", "false"),
+    },
+    FlagSpec {
+        long: "disable-local-file-access",
+        short: None,
+        action: Action::Const("load.blockLocalFileAccess", "true"),
+    },
+    FlagSpec {
+        long: "allow",
+        short: None,
+        action: Action::Setting("load.allowedPath"),
+    },
+    FlagSpec {
+        long: "safe",
+        short: None,
+        action: Action::Const("load.safe", "true"),
+    },
+    FlagSpec {
+        long: "javascript-delay",
+        short: None,
+        action: Action::Setting("load.jsdelay"),
+    },
     // ── Web rendering ────────────────────────────────────────────────────────
-    FlagSpec { long: "no-images", short: None, action: Action::Const("web.loadImages", "false") },
+    FlagSpec {
+        long: "no-images",
+        short: None,
+        action: Action::Const("web.loadImages", "false"),
+    },
 ];
 
 fn arity_of(action: &Action) -> usize {
@@ -173,8 +243,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
             continue;
         }
 
-        let spec = find_flag(tok)
-            .ok_or_else(|| format!("unknown option: {tok}"))?;
+        let spec = find_flag(tok).ok_or_else(|| format!("unknown option: {tok}"))?;
 
         let ar = arity_of(&spec.action);
         if i + ar >= args.len() && ar > 0 {
@@ -188,11 +257,23 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
             Action::Special(kind) => match kind {
                 SpecialKind::Help => {
                     mode = Mode::Help;
-                    return Ok(Parsed { mode, settings, input: None, output: None, quiet });
+                    return Ok(Parsed {
+                        mode,
+                        settings,
+                        input: None,
+                        output: None,
+                        quiet,
+                    });
                 }
                 SpecialKind::Version => {
                     mode = Mode::Version;
-                    return Ok(Parsed { mode, settings, input: None, output: None, quiet });
+                    return Ok(Parsed {
+                        mode,
+                        settings,
+                        input: None,
+                        output: None,
+                        quiet,
+                    });
                 }
                 SpecialKind::Quiet => {
                     quiet = true;
@@ -238,7 +319,13 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         }
     };
 
-    Ok(Parsed { mode, settings, input, output, quiet })
+    Ok(Parsed {
+        mode,
+        settings,
+        input,
+        output,
+        quiet,
+    })
 }
 
 fn parse_input(s: &str) -> Input {
@@ -330,8 +417,14 @@ fn run(args: &[String]) -> i32 {
     }
 
     // ── Unwrap positionals (guaranteed by parse for Convert mode) ─────────────
-    let input = parsed.input.take().expect("input must be Some in Convert mode");
-    let output = parsed.output.take().expect("output must be Some in Convert mode");
+    let input = parsed
+        .input
+        .take()
+        .expect("input must be Some in Convert mode");
+    let output = parsed
+        .output
+        .take()
+        .expect("output must be Some in Convert mode");
     let quiet = parsed.quiet;
 
     // ── Validate file inputs ──────────────────────────────────────────────────
@@ -477,7 +570,10 @@ fn resolve_input(inp: &Input, stdin_temp: Option<&NamedTempFile>) -> Result<Sour
             let tf = stdin_temp.ok_or_else(|| {
                 "internal error: stdin_temp not populated for Stdin input".to_string()
             })?;
-            Ok(Source::Url(format!("file://{}", percent_encode_path(tf.path()))))
+            Ok(Source::Url(format!(
+                "file://{}",
+                percent_encode_path(tf.path())
+            )))
         }
     }
 }
@@ -491,9 +587,16 @@ fn percent_encode_path(path: &std::path::Path) -> String {
     let mut out = String::with_capacity(s.len() + 16);
     for &byte in s.as_bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~'
-            | b'/' | b':' | b'@' => out.push(byte as char),
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'/'
+            | b':'
+            | b'@' => out.push(byte as char),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -550,18 +653,30 @@ mod tests {
     fn help_text_mentions_key_flags() {
         let text = help_text();
         assert!(text.contains("--format"), "help text must mention --format");
-        assert!(text.contains("--quality"), "help text must mention --quality");
+        assert!(
+            text.contains("--quality"),
+            "help text must mention --quality"
+        );
         assert!(text.contains("--width"), "help text must mention --width");
-        assert!(text.contains("--transparent"), "help text must mention --transparent");
+        assert!(
+            text.contains("--transparent"),
+            "help text must mention --transparent"
+        );
         assert!(text.contains("--help"), "help text must mention --help");
-        assert!(text.contains("--version"), "help text must mention --version");
+        assert!(
+            text.contains("--version"),
+            "help text must mention --version"
+        );
     }
 
     #[test]
     fn help_text_mentions_usage() {
         let text = help_text();
         assert!(text.contains("Usage"), "help text must contain 'Usage'");
-        assert!(text.contains("wkhtmltoimage"), "help text must mention the binary name");
+        assert!(
+            text.contains("wkhtmltoimage"),
+            "help text must mention the binary name"
+        );
     }
 
     // ── Unit: flag → setting mapping ─────────────────────────────────────────
@@ -605,10 +720,10 @@ mod tests {
     #[test]
     fn crop_flags() {
         let parsed = parse(&args(&[
-            "--crop-x", "10", "--crop-y", "20",
-            "--crop-w", "300", "--crop-h", "200",
-            "in.html", "out.png",
-        ])).unwrap();
+            "--crop-x", "10", "--crop-y", "20", "--crop-w", "300", "--crop-h", "200", "in.html",
+            "out.png",
+        ]))
+        .unwrap();
         assert_eq!(parsed.settings.crop_x, Some(10));
         assert_eq!(parsed.settings.crop_y, Some(20));
         assert_eq!(parsed.settings.crop_w, Some(300));
@@ -647,7 +762,12 @@ mod tests {
 
     #[test]
     fn disable_local_file_access_flag() {
-        let parsed = parse(&args(&["--disable-local-file-access", "in.html", "out.png"])).unwrap();
+        let parsed = parse(&args(&[
+            "--disable-local-file-access",
+            "in.html",
+            "out.png",
+        ]))
+        .unwrap();
         assert!(!parsed.settings.allow_local_file_access);
     }
 
@@ -757,7 +877,15 @@ mod tests {
 
     #[test]
     fn to_image_opts_jpeg() {
-        let parsed = parse(&args(&["-f", "jpeg", "--quality", "75", "in.html", "out.jpg"])).unwrap();
+        let parsed = parse(&args(&[
+            "-f",
+            "jpeg",
+            "--quality",
+            "75",
+            "in.html",
+            "out.jpg",
+        ]))
+        .unwrap();
         let opts = parsed.settings.to_image_opts();
         assert!(matches!(opts.format, ImageFormat::Jpeg));
         assert_eq!(opts.quality, 75);
@@ -769,5 +897,4 @@ mod tests {
         let opts = parsed.settings.to_image_opts();
         assert!(matches!(opts.format, ImageFormat::Png));
     }
-
 }

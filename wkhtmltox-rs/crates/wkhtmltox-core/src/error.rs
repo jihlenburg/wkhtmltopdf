@@ -5,7 +5,10 @@ use thiserror::Error;
 #[non_exhaustive]
 pub enum WkError {
     #[error("load failed: {url} (http {http_status:?})")]
-    Load { url: String, http_status: Option<u16> },
+    Load {
+        url: String,
+        http_status: Option<u16>,
+    },
     #[error("render error: {0}")]
     Render(String),
     #[error("pagination error: {0}")]

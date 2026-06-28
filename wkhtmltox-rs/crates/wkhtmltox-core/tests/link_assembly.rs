@@ -42,19 +42,13 @@ fn build_3page_with_named_dest() -> Vec<u8> {
     // Use A4-height MediaBox so the geom-derived page height (≈ 841.9 pt) is
     // consistent, ensuring `top:100 CSS px` resolves to page 0.
     offsets[3] = buf.len();
-    buf.push_str(
-        "3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>\nendobj\n",
-    );
+    buf.push_str("3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>\nendobj\n");
 
     offsets[4] = buf.len();
-    buf.push_str(
-        "4 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>\nendobj\n",
-    );
+    buf.push_str("4 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>\nendobj\n");
 
     offsets[5] = buf.len();
-    buf.push_str(
-        "5 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>\nendobj\n",
-    );
+    buf.push_str("5 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>\nendobj\n");
 
     offsets[6] = buf.len();
     buf.push_str("6 0 obj\n<</Dests 7 0 R>>\nendobj\n");
@@ -87,10 +81,7 @@ fn build_3page_with_named_dest() -> Vec<u8> {
 /// named dest "x" → page 2 (0-based).  Global dest = 0 + 0 + 2 = 2 → lopdf pg 3.
 #[test]
 fn internal_link_produces_link_annot_on_correct_page() {
-    let out = std::env::temp_dir().join(format!(
-        "wkx_link_asm_{}.pdf",
-        std::process::id()
-    ));
+    let out = std::env::temp_dir().join(format!("wkx_link_asm_{}.pdf", std::process::id()));
 
     let mut mock = MockRenderer::new();
     // 3-page PDF with named dest "x" → page 2 (0-based).
@@ -110,7 +101,9 @@ fn internal_link_produces_link_annot_on_correct_page() {
 
     let report = assemble_pdf(
         &mut mock,
-        &[Source::Html("<p>content with <a href='#x'>link</a></p>".into())],
+        &[Source::Html(
+            "<p>content with <a href='#x'>link</a></p>".into(),
+        )],
         &PageGeometry::default(),
         &out,
         &AssembleOpts::default(),

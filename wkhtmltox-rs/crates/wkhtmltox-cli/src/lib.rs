@@ -163,87 +163,387 @@ struct FlagSpec {
 /// → 0.
 static FLAGS: &[FlagSpec] = &[
     // ── Info / meta flags ────────────────────────────────────────────────────
-    FlagSpec { long: "help",          short: Some('h'), target: Target::Global, action: Action::Special(SpecialKind::Help)         },
-    FlagSpec { long: "extended-help", short: Some('H'), target: Target::Global, action: Action::Special(SpecialKind::ExtendedHelp) },
-    FlagSpec { long: "version",       short: Some('V'), target: Target::Global, action: Action::Special(SpecialKind::Version)      },
-    FlagSpec { long: "manpage",       short: None,      target: Target::Global, action: Action::Special(SpecialKind::Manpage)      },
-    FlagSpec { long: "readme",        short: None,      target: Target::Global, action: Action::Special(SpecialKind::Readme)       },
-    FlagSpec { long: "quiet",         short: Some('q'), target: Target::Global, action: Action::Special(SpecialKind::Quiet)        },
-    FlagSpec { long: "toc",           short: None,      target: Target::Global, action: Action::Special(SpecialKind::Toc)          },
-
+    FlagSpec {
+        long: "help",
+        short: Some('h'),
+        target: Target::Global,
+        action: Action::Special(SpecialKind::Help),
+    },
+    FlagSpec {
+        long: "extended-help",
+        short: Some('H'),
+        target: Target::Global,
+        action: Action::Special(SpecialKind::ExtendedHelp),
+    },
+    FlagSpec {
+        long: "version",
+        short: Some('V'),
+        target: Target::Global,
+        action: Action::Special(SpecialKind::Version),
+    },
+    FlagSpec {
+        long: "manpage",
+        short: None,
+        target: Target::Global,
+        action: Action::Special(SpecialKind::Manpage),
+    },
+    FlagSpec {
+        long: "readme",
+        short: None,
+        target: Target::Global,
+        action: Action::Special(SpecialKind::Readme),
+    },
+    FlagSpec {
+        long: "quiet",
+        short: Some('q'),
+        target: Target::Global,
+        action: Action::Special(SpecialKind::Quiet),
+    },
+    FlagSpec {
+        long: "toc",
+        short: None,
+        target: Target::Global,
+        action: Action::Special(SpecialKind::Toc),
+    },
     // ── Global layout ────────────────────────────────────────────────────────
-    FlagSpec { long: "page-size",         short: Some('s'), target: Target::Global, action: Action::Setting("size.pageSize")  },
-    FlagSpec { long: "orientation",       short: Some('O'), target: Target::Global, action: Action::Setting("orientation")    },
-    FlagSpec { long: "margin-top",        short: Some('T'), target: Target::Global, action: Action::Setting("margin.top")     },
-    FlagSpec { long: "margin-bottom",     short: Some('B'), target: Target::Global, action: Action::Setting("margin.bottom")  },
-    FlagSpec { long: "margin-left",       short: Some('L'), target: Target::Global, action: Action::Setting("margin.left")    },
-    FlagSpec { long: "margin-right",      short: Some('R'), target: Target::Global, action: Action::Setting("margin.right")   },
-    FlagSpec { long: "dpi",               short: Some('D'), target: Target::Global, action: Action::Setting("dpi")            },
-    FlagSpec { long: "page-width",        short: None,      target: Target::Global, action: Action::Setting("size.width")     },
-    FlagSpec { long: "page-height",       short: None,      target: Target::Global, action: Action::Setting("size.height")    },
-    FlagSpec { long: "image-quality",     short: None,      target: Target::Global, action: Action::Setting("imageQuality")   },
-    FlagSpec { long: "image-dpi",         short: None,      target: Target::Global, action: Action::Setting("imageDPI")       },
-    FlagSpec { long: "title",             short: None,      target: Target::Global, action: Action::Setting("documentTitle")  },
-
-    FlagSpec { long: "grayscale",         short: Some('g'), target: Target::Global, action: Action::Const("colorMode",    "grayscale") },
-    FlagSpec { long: "lowquality",        short: Some('l'), target: Target::Global, action: Action::Const("resolution",   "screen")    },
-    FlagSpec { long: "no-pdf-compression",short: None,      target: Target::Global, action: Action::Const("useCompression","false")    },
-
+    FlagSpec {
+        long: "page-size",
+        short: Some('s'),
+        target: Target::Global,
+        action: Action::Setting("size.pageSize"),
+    },
+    FlagSpec {
+        long: "orientation",
+        short: Some('O'),
+        target: Target::Global,
+        action: Action::Setting("orientation"),
+    },
+    FlagSpec {
+        long: "margin-top",
+        short: Some('T'),
+        target: Target::Global,
+        action: Action::Setting("margin.top"),
+    },
+    FlagSpec {
+        long: "margin-bottom",
+        short: Some('B'),
+        target: Target::Global,
+        action: Action::Setting("margin.bottom"),
+    },
+    FlagSpec {
+        long: "margin-left",
+        short: Some('L'),
+        target: Target::Global,
+        action: Action::Setting("margin.left"),
+    },
+    FlagSpec {
+        long: "margin-right",
+        short: Some('R'),
+        target: Target::Global,
+        action: Action::Setting("margin.right"),
+    },
+    FlagSpec {
+        long: "dpi",
+        short: Some('D'),
+        target: Target::Global,
+        action: Action::Setting("dpi"),
+    },
+    FlagSpec {
+        long: "page-width",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("size.width"),
+    },
+    FlagSpec {
+        long: "page-height",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("size.height"),
+    },
+    FlagSpec {
+        long: "image-quality",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("imageQuality"),
+    },
+    FlagSpec {
+        long: "image-dpi",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("imageDPI"),
+    },
+    FlagSpec {
+        long: "title",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("documentTitle"),
+    },
+    FlagSpec {
+        long: "grayscale",
+        short: Some('g'),
+        target: Target::Global,
+        action: Action::Const("colorMode", "grayscale"),
+    },
+    FlagSpec {
+        long: "lowquality",
+        short: Some('l'),
+        target: Target::Global,
+        action: Action::Const("resolution", "screen"),
+    },
+    FlagSpec {
+        long: "no-pdf-compression",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("useCompression", "false"),
+    },
     // ── Outline ──────────────────────────────────────────────────────────────
-    FlagSpec { long: "outline",       short: None, target: Target::Global, action: Action::Const("outline", "true")  },
-    FlagSpec { long: "no-outline",    short: None, target: Target::Global, action: Action::Const("outline", "false") },
-    FlagSpec { long: "outline-depth", short: None, target: Target::Global, action: Action::Setting("outlineDepth")  },
-
+    FlagSpec {
+        long: "outline",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("outline", "true"),
+    },
+    FlagSpec {
+        long: "no-outline",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("outline", "false"),
+    },
+    FlagSpec {
+        long: "outline-depth",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("outlineDepth"),
+    },
     // ── Per-page / both-phase flags ──────────────────────────────────────────
-    FlagSpec { long: "zoom",             short: None,      target: Target::Both, action: Action::Setting("load.zoomFactor")       },
-    FlagSpec { long: "javascript-delay", short: None,      target: Target::Both, action: Action::Setting("load.jsdelay")          },
-    FlagSpec { long: "proxy",            short: None,      target: Target::Both, action: Action::Setting("load.proxy")            },
-    FlagSpec { long: "encoding",         short: None,      target: Target::Both, action: Action::Setting("web.defaultEncoding")   },
-    FlagSpec { long: "user-style-sheet", short: None,      target: Target::Both, action: Action::Setting("web.userStyleSheet")    },
-
-    FlagSpec { long: "print-media-type",    short: None,      target: Target::Both, action: Action::Const("web.printMediaType",  "true")  },
-    FlagSpec { long: "no-print-media-type", short: None,      target: Target::Both, action: Action::Const("web.printMediaType",  "false") },
-    FlagSpec { long: "background",          short: None,      target: Target::Both, action: Action::Const("web.background",       "true")  },
-    FlagSpec { long: "no-background",       short: None,      target: Target::Both, action: Action::Const("web.background",       "false") },
-    FlagSpec { long: "enable-javascript",   short: None,      target: Target::Both, action: Action::Const("web.enableJavascript", "true")  },
-    FlagSpec { long: "disable-javascript",  short: Some('n'), target: Target::Both, action: Action::Const("web.enableJavascript", "false") },
-    FlagSpec { long: "enable-forms",        short: None,      target: Target::Global, action: Action::Const("produceForms", "true")        },
-    FlagSpec { long: "images",              short: None,      target: Target::Both, action: Action::Const("web.loadImages",        "true")  },
-    FlagSpec { long: "no-images",           short: None,      target: Target::Both, action: Action::Const("web.loadImages",        "false") },
-
-    FlagSpec { long: "enable-local-file-access",  short: None, target: Target::Both, action: Action::Const("load.blockLocalFileAccess", "false") },
-    FlagSpec { long: "disable-local-file-access", short: None, target: Target::Both, action: Action::Const("load.blockLocalFileAccess", "true")  },
-
+    FlagSpec {
+        long: "zoom",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("load.zoomFactor"),
+    },
+    FlagSpec {
+        long: "javascript-delay",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("load.jsdelay"),
+    },
+    FlagSpec {
+        long: "proxy",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("load.proxy"),
+    },
+    FlagSpec {
+        long: "encoding",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("web.defaultEncoding"),
+    },
+    FlagSpec {
+        long: "user-style-sheet",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("web.userStyleSheet"),
+    },
+    FlagSpec {
+        long: "print-media-type",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("web.printMediaType", "true"),
+    },
+    FlagSpec {
+        long: "no-print-media-type",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("web.printMediaType", "false"),
+    },
+    FlagSpec {
+        long: "background",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("web.background", "true"),
+    },
+    FlagSpec {
+        long: "no-background",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("web.background", "false"),
+    },
+    FlagSpec {
+        long: "enable-javascript",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("web.enableJavascript", "true"),
+    },
+    FlagSpec {
+        long: "disable-javascript",
+        short: Some('n'),
+        target: Target::Both,
+        action: Action::Const("web.enableJavascript", "false"),
+    },
+    FlagSpec {
+        long: "enable-forms",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("produceForms", "true"),
+    },
+    FlagSpec {
+        long: "images",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("web.loadImages", "true"),
+    },
+    FlagSpec {
+        long: "no-images",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("web.loadImages", "false"),
+    },
+    FlagSpec {
+        long: "enable-local-file-access",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("load.blockLocalFileAccess", "false"),
+    },
+    FlagSpec {
+        long: "disable-local-file-access",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("load.blockLocalFileAccess", "true"),
+    },
     // ── Security policy ──────────────────────────────────────────────────────
     // --safe activates the hardened ResourcePolicy (deny file://, block private
     // IPs).  --allow <path> allows a specific directory prefix even under --safe.
-    FlagSpec { long: "safe",                   short: None, target: Target::Global, action: Action::Const("load.safe", "true")              },
-    FlagSpec { long: "allow",                  short: None, target: Target::Global, action: Action::Setting("load.allowedPath")             },
-    FlagSpec { long: "disable-external-links", short: None, target: Target::Global, action: Action::Const("load.disableExternalLinks", "true") },
-    FlagSpec { long: "disable-internal-links", short: None, target: Target::Global, action: Action::Const("load.disableInternalLinks", "true") },
-
+    FlagSpec {
+        long: "safe",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("load.safe", "true"),
+    },
+    FlagSpec {
+        long: "allow",
+        short: None,
+        target: Target::Global,
+        action: Action::Setting("load.allowedPath"),
+    },
+    FlagSpec {
+        long: "disable-external-links",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("load.disableExternalLinks", "true"),
+    },
+    FlagSpec {
+        long: "disable-internal-links",
+        short: None,
+        target: Target::Global,
+        action: Action::Const("load.disableInternalLinks", "true"),
+    },
     // ── Header ───────────────────────────────────────────────────────────────
-    FlagSpec { long: "header-left",      short: None, target: Target::Both, action: Action::Setting("header.left")     },
-    FlagSpec { long: "header-center",    short: None, target: Target::Both, action: Action::Setting("header.center")   },
-    FlagSpec { long: "header-right",     short: None, target: Target::Both, action: Action::Setting("header.right")    },
-    FlagSpec { long: "header-font-size", short: None, target: Target::Both, action: Action::Setting("header.fontSize") },
-    FlagSpec { long: "header-line",      short: None, target: Target::Both, action: Action::Const("header.line", "true")  },
-    FlagSpec { long: "no-header-line",   short: None, target: Target::Both, action: Action::Const("header.line", "false") },
-    FlagSpec { long: "header-spacing",   short: None, target: Target::Both, action: Action::Setting("header.spacing")  },
-
+    FlagSpec {
+        long: "header-left",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("header.left"),
+    },
+    FlagSpec {
+        long: "header-center",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("header.center"),
+    },
+    FlagSpec {
+        long: "header-right",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("header.right"),
+    },
+    FlagSpec {
+        long: "header-font-size",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("header.fontSize"),
+    },
+    FlagSpec {
+        long: "header-line",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("header.line", "true"),
+    },
+    FlagSpec {
+        long: "no-header-line",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("header.line", "false"),
+    },
+    FlagSpec {
+        long: "header-spacing",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("header.spacing"),
+    },
     // ── Footer ───────────────────────────────────────────────────────────────
-    FlagSpec { long: "footer-left",      short: None, target: Target::Both, action: Action::Setting("footer.left")     },
-    FlagSpec { long: "footer-center",    short: None, target: Target::Both, action: Action::Setting("footer.center")   },
-    FlagSpec { long: "footer-right",     short: None, target: Target::Both, action: Action::Setting("footer.right")    },
-    FlagSpec { long: "footer-font-size", short: None, target: Target::Both, action: Action::Setting("footer.fontSize") },
-    FlagSpec { long: "footer-line",      short: None, target: Target::Both, action: Action::Const("footer.line", "true")  },
-    FlagSpec { long: "no-footer-line",   short: None, target: Target::Both, action: Action::Const("footer.line", "false") },
-    FlagSpec { long: "footer-spacing",   short: None, target: Target::Both, action: Action::Setting("footer.spacing")  },
-
+    FlagSpec {
+        long: "footer-left",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("footer.left"),
+    },
+    FlagSpec {
+        long: "footer-center",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("footer.center"),
+    },
+    FlagSpec {
+        long: "footer-right",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("footer.right"),
+    },
+    FlagSpec {
+        long: "footer-font-size",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("footer.fontSize"),
+    },
+    FlagSpec {
+        long: "footer-line",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("footer.line", "true"),
+    },
+    FlagSpec {
+        long: "no-footer-line",
+        short: None,
+        target: Target::Both,
+        action: Action::Const("footer.line", "false"),
+    },
+    FlagSpec {
+        long: "footer-spacing",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("footer.spacing"),
+    },
     // ── Two-argument repeatables ─────────────────────────────────────────────
-    FlagSpec { long: "cookie",         short: None, target: Target::Both, action: Action::TwoArg("load.cookies")      },
-    FlagSpec { long: "custom-header",  short: None, target: Target::Both, action: Action::TwoArg("load.customHeaders") },
-    FlagSpec { long: "replace",        short: None, target: Target::Both, action: Action::TwoArg("replacements")      },
+    FlagSpec {
+        long: "cookie",
+        short: None,
+        target: Target::Both,
+        action: Action::TwoArg("load.cookies"),
+    },
+    FlagSpec {
+        long: "custom-header",
+        short: None,
+        target: Target::Both,
+        action: Action::TwoArg("load.customHeaders"),
+    },
+    FlagSpec {
+        long: "replace",
+        short: None,
+        target: Target::Both,
+        action: Action::TwoArg("replacements"),
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -338,16 +638,14 @@ fn apply_setting(
     warnings: &mut Vec<String>,
 ) -> Result<(), String> {
     match target {
-        Target::Global => {
-            match set_global(global, name, value) {
-                Ok(()) => {
-                    warnings.extend(global.take_warnings());
-                }
-                Err(e) => {
-                    return Err(format!("invalid value for --{cli_flag}: {e}"));
-                }
+        Target::Global => match set_global(global, name, value) {
+            Ok(()) => {
+                warnings.extend(global.take_warnings());
             }
-        }
+            Err(e) => {
+                return Err(format!("invalid value for --{cli_flag}: {e}"));
+            }
+        },
         Target::Both => {
             if !in_obj_phase {
                 // Leading phase: apply to global when the setting is known
@@ -428,8 +726,7 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
             || (tok.starts_with('-') && tok.len() == 2 && tok.as_bytes()[1].is_ascii_alphabetic());
 
         if is_flag_tok {
-            let spec = find_flag(tok)
-                .ok_or_else(|| format!("unknown option: {tok}"))?;
+            let spec = find_flag(tok).ok_or_else(|| format!("unknown option: {tok}"))?;
 
             let ar = arity_of(&spec.action);
             if i + ar >= args.len() {
@@ -493,7 +790,6 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
             }
 
             i += 1 + ar;
-
         } else if tok == "cover" {
             // Positional keyword: consume next token as cover input.
             if i + 1 >= args.len() {
@@ -501,11 +797,9 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
             }
             cover = Some(parse_input(args[i + 1].as_str()));
             i += 2;
-
         } else if tok == "toc" {
             toc = true;
             i += 1;
-
         } else {
             // Regular positional (page input or output).
             // Capture the pre_flags accumulated since the last positional.
@@ -620,9 +914,7 @@ pub fn help_text(extended: bool) -> String {
 
     out.push('\n');
     if !extended {
-        out.push_str(
-            "Use --extended-help for documentation on less-used options.\n",
-        );
+        out.push_str("Use --extended-help for documentation on less-used options.\n");
     }
     out
 }
@@ -645,13 +937,29 @@ mod tests {
     ///   one object page.html, output out.pdf
     #[test]
     fn spec_main_test() {
-        let inv = parse(&args(&["-s", "A4", "--toc", "cover", "c.html", "page.html", "out.pdf"]))
-            .expect("parse should succeed");
+        let inv = parse(&args(&[
+            "-s",
+            "A4",
+            "--toc",
+            "cover",
+            "c.html",
+            "page.html",
+            "out.pdf",
+        ]))
+        .expect("parse should succeed");
 
         assert_eq!(inv.mode, RunMode::Convert);
-        assert_eq!(inv.global.page_size, NamedPageSize::A4, "page size should be A4");
+        assert_eq!(
+            inv.global.page_size,
+            NamedPageSize::A4,
+            "page size should be A4"
+        );
         assert!(inv.toc, "toc should be true");
-        assert_eq!(inv.cover, Some(Input::File("c.html".to_owned())), "cover should be c.html");
+        assert_eq!(
+            inv.cover,
+            Some(Input::File("c.html".to_owned())),
+            "cover should be c.html"
+        );
         assert_eq!(inv.objects.len(), 1, "should have exactly one page object");
         assert_eq!(inv.objects[0].1, Input::File("page.html".to_owned()));
         assert_eq!(inv.output, Output::Path("out.pdf".to_owned()));
@@ -661,8 +969,14 @@ mod tests {
     /// --cookie k v is parsed; registry warns (unimplemented) but does not error.
     #[test]
     fn cookie_two_arg() {
-        let inv = parse(&args(&["--cookie", "session", "abc123", "page.html", "out.pdf"]))
-            .expect("parse should succeed");
+        let inv = parse(&args(&[
+            "--cookie",
+            "session",
+            "abc123",
+            "page.html",
+            "out.pdf",
+        ]))
+        .expect("parse should succeed");
 
         assert_eq!(inv.objects.len(), 1);
         // The cookie was applied via set_object → recognised-but-unimplemented warning.
@@ -686,7 +1000,8 @@ mod tests {
     fn per_object_flag_javascript_delay() {
         let inv = parse(&args(&[
             "page1.html",
-            "--javascript-delay", "500",
+            "--javascript-delay",
+            "500",
             "page2.html",
             "o.pdf",
         ]))
@@ -700,9 +1015,15 @@ mod tests {
         assert_eq!(*inp2, Input::File("page2.html".to_owned()));
 
         // page1 should retain the default jsdelay (200 ms).
-        assert_eq!(obj1.javascript_delay_ms, 200, "page1 should have default jsdelay");
+        assert_eq!(
+            obj1.javascript_delay_ms, 200,
+            "page1 should have default jsdelay"
+        );
         // page2 should have the overridden value.
-        assert_eq!(obj2.javascript_delay_ms, 500, "page2 should have jsdelay=500");
+        assert_eq!(
+            obj2.javascript_delay_ms, 500,
+            "page2 should have jsdelay=500"
+        );
     }
 
     // ── Test 4: global layout flag applied from object phase → still global ─
@@ -714,7 +1035,8 @@ mod tests {
 
         let inv = parse(&args(&[
             "page1.html",
-            "--orientation", "Landscape",
+            "--orientation",
+            "Landscape",
             "page2.html",
             "o.pdf",
         ]))
@@ -753,7 +1075,10 @@ mod tests {
     #[test]
     fn unknown_flag_is_error() {
         let err = parse(&args(&["--frobnicate"])).unwrap_err();
-        assert!(err.contains("unknown option"), "error should mention 'unknown option': {err}");
+        assert!(
+            err.contains("unknown option"),
+            "error should mention 'unknown option': {err}"
+        );
     }
 
     // ── Test 8: stdin / stdout ───────────────────────────────────────────
@@ -774,22 +1099,30 @@ mod tests {
     // ── Test 9: URL detection ─────────────────────────────────────────────
     #[test]
     fn url_input() {
-        let inv =
-            parse(&args(&["https://example.com", "out.pdf"])).expect("parse should succeed");
-        assert_eq!(inv.objects[0].1, Input::Url("https://example.com".to_owned()));
+        let inv = parse(&args(&["https://example.com", "out.pdf"])).expect("parse should succeed");
+        assert_eq!(
+            inv.objects[0].1,
+            Input::Url("https://example.com".to_owned())
+        );
     }
 
     // ── Test 10: no positionals → error ──────────────────────────────────
     #[test]
     fn no_positionals_is_error() {
         let err = parse(&args(&["--quiet"])).unwrap_err();
-        assert!(err.contains("no output"), "error should mention 'no output': {err}");
+        assert!(
+            err.contains("no output"),
+            "error should mention 'no output': {err}"
+        );
     }
 
     // ── Test 11: extended-help / manpage / readme ─────────────────────────
     #[test]
     fn extended_help_flag() {
-        assert_eq!(parse(&args(&["--extended-help"])).unwrap().mode, RunMode::ExtendedHelp);
+        assert_eq!(
+            parse(&args(&["--extended-help"])).unwrap().mode,
+            RunMode::ExtendedHelp
+        );
         assert_eq!(parse(&args(&["-H"])).unwrap().mode, RunMode::ExtendedHelp);
     }
 
@@ -807,10 +1140,14 @@ mod tests {
     #[test]
     fn global_flags_leading_phase() {
         let inv = parse(&args(&[
-            "-s", "Letter",
-            "-O", "Landscape",
-            "-T", "20mm",
-            "-B", "15mm",
+            "-s",
+            "Letter",
+            "-O",
+            "Landscape",
+            "-T",
+            "20mm",
+            "-B",
+            "15mm",
             "page.html",
             "out.pdf",
         ]))
@@ -839,7 +1176,10 @@ mod tests {
     fn zoom_in_leading_phase_goes_to_global() {
         let inv =
             parse(&args(&["--zoom", "1.5", "page.html", "out.pdf"])).expect("parse should succeed");
-        assert!((inv.global.zoom - 1.5).abs() < 1e-9, "global zoom should be 1.5");
+        assert!(
+            (inv.global.zoom - 1.5).abs() < 1e-9,
+            "global zoom should be 1.5"
+        );
     }
 
     // ── Test 15: --zoom in object phase → per-object ──────────────────────
@@ -847,7 +1187,8 @@ mod tests {
     fn zoom_in_object_phase_goes_to_object() {
         let inv = parse(&args(&[
             "page1.html",
-            "--zoom", "2.0",
+            "--zoom",
+            "2.0",
             "page2.html",
             "out.pdf",
         ]))
@@ -878,8 +1219,10 @@ mod tests {
     #[test]
     fn header_flags_leading_phase() {
         let inv = parse(&args(&[
-            "--header-center", "[page]/[topage]",
-            "--header-font-size", "10",
+            "--header-center",
+            "[page]/[topage]",
+            "--header-font-size",
+            "10",
             "--header-line",
             "p.html",
             "out.pdf",
@@ -901,9 +1244,13 @@ mod tests {
     // ── Test 19: cover positional keyword with URL ────────────────────────
     #[test]
     fn cover_positional_with_url() {
-        let inv =
-            parse(&args(&["cover", "https://example.com/cover", "page.html", "out.pdf"]))
-                .expect("should parse");
+        let inv = parse(&args(&[
+            "cover",
+            "https://example.com/cover",
+            "page.html",
+            "out.pdf",
+        ]))
+        .expect("should parse");
         assert_eq!(
             inv.cover,
             Some(Input::Url("https://example.com/cover".to_owned()))
@@ -914,8 +1261,8 @@ mod tests {
     // ── Test 20: short flags ──────────────────────────────────────────────
     #[test]
     fn short_flags_work() {
-        let inv = parse(&args(&["-s", "A4", "-g", "-q", "page.html", "out.pdf"]))
-            .expect("should parse");
+        let inv =
+            parse(&args(&["-s", "A4", "-g", "-q", "page.html", "out.pdf"])).expect("should parse");
         assert_eq!(inv.global.page_size, NamedPageSize::A4);
         use wkhtmltox_core::settings::ColorMode;
         assert!(matches!(inv.global.color_mode, ColorMode::Grayscale));
@@ -932,10 +1279,19 @@ mod tests {
     #[test]
     fn help_text_contains_known_flags() {
         let text = crate::help_text(false);
-        assert!(text.contains("--page-size"), "expected --page-size in help text");
+        assert!(
+            text.contains("--page-size"),
+            "expected --page-size in help text"
+        );
         assert!(text.contains("--help"), "expected --help in help text");
-        assert!(text.contains("--version"), "expected --version in help text");
-        assert!(text.contains("--margin-top"), "expected --margin-top in help text");
+        assert!(
+            text.contains("--version"),
+            "expected --version in help text"
+        );
+        assert!(
+            text.contains("--margin-top"),
+            "expected --margin-top in help text"
+        );
     }
 
     #[test]
@@ -946,7 +1302,10 @@ mod tests {
             text.contains("extended help"),
             "extended help header should say 'extended help'"
         );
-        assert!(text.contains("--outline-depth"), "expected --outline-depth in extended help");
+        assert!(
+            text.contains("--outline-depth"),
+            "expected --outline-depth in extended help"
+        );
     }
 
     // ── Tests: bad flag values → parse Err (Fix 1) ───────────────────────
@@ -980,7 +1339,11 @@ mod tests {
     #[test]
     fn bad_zoom_value_is_error_object_phase() {
         let err = parse(&args(&[
-            "page1.html", "--zoom", "abc", "page2.html", "out.pdf",
+            "page1.html",
+            "--zoom",
+            "abc",
+            "page2.html",
+            "out.pdf",
         ]))
         .unwrap_err();
         assert!(

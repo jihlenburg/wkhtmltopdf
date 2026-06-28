@@ -6,9 +6,14 @@ use std::path::{Path, PathBuf};
 extern "C" {
     pub fn wkx_pdf_roundtrip(in_path: *const c_char, out_path: *const c_char) -> c_int;
     fn wkx_pdf_add_text_field(
-        in_path: *const c_char, out_path: *const c_char,
-        field_name: *const c_char, page_index: c_int,
-        x: f64, y: f64, w: f64, h: f64,
+        in_path: *const c_char,
+        out_path: *const c_char,
+        field_name: *const c_char,
+        page_index: c_int,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
     ) -> c_int;
     fn wkx_pdf_merge(in_paths: *const *const c_char, n: c_int, out: *const c_char) -> c_int;
     fn wkx_pdf_set_outline(
@@ -87,18 +92,11 @@ pub fn set_outline(
 /// `fmt` may contain `[page]` (substituted with the current page number) and `[topage]`
 /// (substituted with the last page number).  `start` is the number assigned to the first page
 /// (typically `1`).
-pub fn stamp_footer(
-    in_path: &Path,
-    out_path: &Path,
-    fmt: &str,
-    start: u32,
-) -> Result<(), String> {
+pub fn stamp_footer(in_path: &Path, out_path: &Path, fmt: &str, start: u32) -> Result<(), String> {
     let ci = CString::new(in_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
     let co = CString::new(out_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
     let cf = CString::new(fmt.as_bytes()).map_err(|e| e.to_string())?;
-    let rc = unsafe {
-        wkx_pdf_stamp_footer(ci.as_ptr(), co.as_ptr(), cf.as_ptr(), start as c_int)
-    };
+    let rc = unsafe { wkx_pdf_stamp_footer(ci.as_ptr(), co.as_ptr(), cf.as_ptr(), start as c_int) };
     if rc == 0 {
         Ok(())
     } else {
@@ -187,7 +185,10 @@ pub fn add_links(in_path: &Path, out_path: &Path, links: &[LinkSpec]) -> Result<
 
     let src_pages_c: Vec<c_int> = links.iter().map(|(s, _, _)| *s as c_int).collect();
     let dest_pages_c: Vec<c_int> = links.iter().map(|(_, _, d)| *d as c_int).collect();
-    let rects_c: Vec<f64> = links.iter().flat_map(|(_, r, _)| r.iter().copied()).collect();
+    let rects_c: Vec<f64> = links
+        .iter()
+        .flat_map(|(_, r, _)| r.iter().copied())
+        .collect();
 
     let rc = unsafe {
         wkx_pdf_add_links(
@@ -259,9 +260,7 @@ pub fn add_text_fields(pdf: &[u8], fields: &[TextFieldSpec]) -> Result<Vec<u8>, 
 pub fn merge(inputs: &[PathBuf], out: &Path) -> Result<(), String> {
     let cs: Vec<CString> = inputs
         .iter()
-        .map(|p| {
-            CString::new(p.to_string_lossy().as_bytes()).map_err(|e| e.to_string())
-        })
+        .map(|p| CString::new(p.to_string_lossy().as_bytes()).map_err(|e| e.to_string()))
         .collect::<Result<_, _>>()?;
     let ptrs: Vec<*const c_char> = cs.iter().map(|c| c.as_ptr()).collect();
     let co = CString::new(out.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;

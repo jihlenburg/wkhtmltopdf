@@ -40,11 +40,9 @@ pub type WkObjectSettings = PdfObjectSettings;
 // ---------------------------------------------------------------------------
 
 /// `void (*)(wkhtmltopdf_converter *, const char *)`
-pub type WkhtmltopdfStrCallback =
-    Option<unsafe extern "C" fn(*mut CConverter, *const c_char)>;
+pub type WkhtmltopdfStrCallback = Option<unsafe extern "C" fn(*mut CConverter, *const c_char)>;
 /// `void (*)(wkhtmltopdf_converter *, const int)`
-pub type WkhtmltopdfIntCallback =
-    Option<unsafe extern "C" fn(*mut CConverter, c_int)>;
+pub type WkhtmltopdfIntCallback = Option<unsafe extern "C" fn(*mut CConverter, c_int)>;
 /// `void (*)(wkhtmltopdf_converter *)`
 pub type WkhtmltopdfVoidCallback = Option<unsafe extern "C" fn(*mut CConverter)>;
 
@@ -238,8 +236,7 @@ pub extern "C" fn wkhtmltopdf_extended_qt() -> c_int {
 /// Points to a `'static` NUL-terminated byte string — always valid.
 #[no_mangle]
 pub extern "C" fn wkhtmltopdf_version() -> *const c_char {
-    std::panic::catch_unwind(|| VERSION_STR.as_ptr() as *const c_char)
-        .unwrap_or(empty_cstr())
+    std::panic::catch_unwind(|| VERSION_STR.as_ptr() as *const c_char).unwrap_or(empty_cstr())
 }
 
 // ---------------------------------------------------------------------------
@@ -249,10 +246,8 @@ pub extern "C" fn wkhtmltopdf_version() -> *const c_char {
 /// `wkhtmltopdf_create_global_settings()` → opaque handle.
 #[no_mangle]
 pub extern "C" fn wkhtmltopdf_create_global_settings() -> *mut WkGlobalSettings {
-    std::panic::catch_unwind(|| {
-        Box::into_raw(Box::new(GlobalSettings::default()))
-    })
-    .unwrap_or(std::ptr::null_mut())
+    std::panic::catch_unwind(|| Box::into_raw(Box::new(GlobalSettings::default())))
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// `wkhtmltopdf_destroy_global_settings(settings)`.
@@ -261,9 +256,7 @@ pub extern "C" fn wkhtmltopdf_create_global_settings() -> *mut WkGlobalSettings 
 /// `settings` must be a live pointer previously returned by
 /// `wkhtmltopdf_create_global_settings` and not yet destroyed.
 #[no_mangle]
-pub unsafe extern "C" fn wkhtmltopdf_destroy_global_settings(
-    settings: *mut WkGlobalSettings,
-) {
+pub unsafe extern "C" fn wkhtmltopdf_destroy_global_settings(settings: *mut WkGlobalSettings) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if !settings.is_null() {
             drop(Box::from_raw(settings));
@@ -328,10 +321,8 @@ pub unsafe extern "C" fn wkhtmltopdf_get_global_setting(
 /// `wkhtmltopdf_create_object_settings()` → opaque handle.
 #[no_mangle]
 pub extern "C" fn wkhtmltopdf_create_object_settings() -> *mut WkObjectSettings {
-    std::panic::catch_unwind(|| {
-        Box::into_raw(Box::new(PdfObjectSettings::default()))
-    })
-    .unwrap_or(std::ptr::null_mut())
+    std::panic::catch_unwind(|| Box::into_raw(Box::new(PdfObjectSettings::default())))
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// `wkhtmltopdf_destroy_object_settings(settings)`.
@@ -339,9 +330,7 @@ pub extern "C" fn wkhtmltopdf_create_object_settings() -> *mut WkObjectSettings 
 /// # Safety
 /// `settings` must be a live pointer not yet destroyed.
 #[no_mangle]
-pub unsafe extern "C" fn wkhtmltopdf_destroy_object_settings(
-    settings: *mut WkObjectSettings,
-) {
+pub unsafe extern "C" fn wkhtmltopdf_destroy_object_settings(settings: *mut WkObjectSettings) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if !settings.is_null() {
             drop(Box::from_raw(settings));
@@ -554,7 +543,11 @@ pub unsafe extern "C" fn wkhtmltopdf_add_object(
             None
         } else {
             let s = CStr::from_ptr(data).to_string_lossy().into_owned();
-            if s.is_empty() { None } else { Some(s) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
         (*converter).objects.push((os, html));
     }));
@@ -615,7 +608,10 @@ pub unsafe extern "C" fn wkhtmltopdf_convert(converter: *mut CConverter) -> c_in
         progress_emit(converter, 0);
 
         // Spawn Chromium, forwarding the global proxy setting if set.
-        let proxy = { let conv = &*converter; conv.global.proxy.clone() };
+        let proxy = {
+            let conv = &*converter;
+            conv.global.proxy.clone()
+        };
         let mut renderer = match ChromiumRenderer::spawn_opts(SpawnOpts { proxy }) {
             Ok(r) => r,
             Err(e) => {
@@ -692,7 +688,9 @@ pub unsafe extern "C" fn wkhtmltopdf_convert(converter: *mut CConverter) -> c_in
 #[no_mangle]
 pub unsafe extern "C" fn wkhtmltopdf_current_phase(converter: *mut CConverter) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if converter.is_null() { return -1; }
+        if converter.is_null() {
+            return -1;
+        }
         (*converter).cur_phase
     }))
     .unwrap_or(-1)
@@ -702,7 +700,9 @@ pub unsafe extern "C" fn wkhtmltopdf_current_phase(converter: *mut CConverter) -
 #[no_mangle]
 pub unsafe extern "C" fn wkhtmltopdf_phase_count(converter: *mut CConverter) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if converter.is_null() { return 0; }
+        if converter.is_null() {
+            return 0;
+        }
         (*converter).phase_count
     }))
     .unwrap_or(0)
@@ -732,9 +732,7 @@ pub unsafe extern "C" fn wkhtmltopdf_phase_description(
 /// Returns a human-readable progress description (e.g. `"Printing pages [80%]"`).
 /// Borrowed from the converter's string cache; valid until destroyed.
 #[no_mangle]
-pub unsafe extern "C" fn wkhtmltopdf_progress_string(
-    converter: *mut CConverter,
-) -> *const c_char {
+pub unsafe extern "C" fn wkhtmltopdf_progress_string(converter: *mut CConverter) -> *const c_char {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if converter.is_null() {
             return empty_cstr();
@@ -749,7 +747,9 @@ pub unsafe extern "C" fn wkhtmltopdf_progress_string(
 #[no_mangle]
 pub unsafe extern "C" fn wkhtmltopdf_http_error_code(converter: *mut CConverter) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if converter.is_null() { return 0; }
+        if converter.is_null() {
+            return 0;
+        }
         (*converter).http_error
     }))
     .unwrap_or(0)
@@ -802,9 +802,16 @@ fn percent_encode_path(path: &std::path::Path) -> String {
     let mut out = String::with_capacity(s.len() + 16);
     for &byte in s.as_bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~'
-            | b'/' | b':' | b'@' => out.push(byte as char),
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'/'
+            | b':'
+            | b'@' => out.push(byte as char),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -836,11 +843,9 @@ pub type WkImageGlobalSettings = ImageGlobalSettings;
 pub type WkhtmltoimageStrCallback =
     Option<unsafe extern "C" fn(*mut CImageConverter, *const c_char)>;
 /// `void (*)(wkhtmltoimage_converter *, const int)`
-pub type WkhtmltoimageIntCallback =
-    Option<unsafe extern "C" fn(*mut CImageConverter, c_int)>;
+pub type WkhtmltoimageIntCallback = Option<unsafe extern "C" fn(*mut CImageConverter, c_int)>;
 /// `void (*)(wkhtmltoimage_converter *)`
-pub type WkhtmltoimageVoidCallback =
-    Option<unsafe extern "C" fn(*mut CImageConverter)>;
+pub type WkhtmltoimageVoidCallback = Option<unsafe extern "C" fn(*mut CImageConverter)>;
 
 // ---------------------------------------------------------------------------
 // Phase names for wkhtmltoimage
@@ -920,7 +925,10 @@ unsafe fn img_phase_emit(conv: *mut CImageConverter, phase: i32) {
 
 unsafe fn img_progress_emit(conv: *mut CImageConverter, pct: c_int) {
     let phase = (*conv).cur_phase;
-    let desc = IMAGE_PHASES.get(phase.max(0) as usize).copied().unwrap_or("");
+    let desc = IMAGE_PHASES
+        .get(phase.max(0) as usize)
+        .copied()
+        .unwrap_or("");
     (*conv).progress_str = format!("{desc} [{pct}%]");
     if let Some(cb) = (*conv).progress_changed_cb {
         cb(conv, pct);
@@ -967,8 +975,7 @@ pub extern "C" fn wkhtmltoimage_extended_qt() -> c_int {
 /// `wkhtmltoimage_version()` → `const char*`.
 #[no_mangle]
 pub extern "C" fn wkhtmltoimage_version() -> *const c_char {
-    std::panic::catch_unwind(|| VERSION_STR.as_ptr() as *const c_char)
-        .unwrap_or(empty_cstr())
+    std::panic::catch_unwind(|| VERSION_STR.as_ptr() as *const c_char).unwrap_or(empty_cstr())
 }
 
 // ---------------------------------------------------------------------------
@@ -978,10 +985,8 @@ pub extern "C" fn wkhtmltoimage_version() -> *const c_char {
 /// `wkhtmltoimage_create_global_settings()` → opaque handle.
 #[no_mangle]
 pub extern "C" fn wkhtmltoimage_create_global_settings() -> *mut WkImageGlobalSettings {
-    std::panic::catch_unwind(|| {
-        Box::into_raw(Box::new(ImageGlobalSettings::default()))
-    })
-    .unwrap_or(std::ptr::null_mut())
+    std::panic::catch_unwind(|| Box::into_raw(Box::new(ImageGlobalSettings::default())))
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// `wkhtmltoimage_destroy_global_settings(settings)`.
@@ -1079,8 +1084,14 @@ pub unsafe extern "C" fn wkhtmltoimage_create_converter(
         let inline_html: Option<String> = if data.is_null() {
             None
         } else {
-            let s = std::ffi::CStr::from_ptr(data).to_string_lossy().into_owned();
-            if s.is_empty() { None } else { Some(s) }
+            let s = std::ffi::CStr::from_ptr(data)
+                .to_string_lossy()
+                .into_owned();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
         Box::into_raw(Box::new(CImageConverter::new(gs, inline_html)))
     }))
@@ -1332,11 +1343,11 @@ pub unsafe extern "C" fn wkhtmltoimage_convert(converter: *mut CImageConverter) 
 
 /// `wkhtmltoimage_current_phase(converter)` → current phase index, or -1.
 #[no_mangle]
-pub unsafe extern "C" fn wkhtmltoimage_current_phase(
-    converter: *mut CImageConverter,
-) -> c_int {
+pub unsafe extern "C" fn wkhtmltoimage_current_phase(converter: *mut CImageConverter) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if converter.is_null() { return -1; }
+        if converter.is_null() {
+            return -1;
+        }
         (*converter).cur_phase
     }))
     .unwrap_or(-1)
@@ -1344,11 +1355,11 @@ pub unsafe extern "C" fn wkhtmltoimage_current_phase(
 
 /// `wkhtmltoimage_phase_count(converter)` → number of phases.
 #[no_mangle]
-pub unsafe extern "C" fn wkhtmltoimage_phase_count(
-    converter: *mut CImageConverter,
-) -> c_int {
+pub unsafe extern "C" fn wkhtmltoimage_phase_count(converter: *mut CImageConverter) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if converter.is_null() { return 0; }
+        if converter.is_null() {
+            return 0;
+        }
         (*converter).phase_count
     }))
     .unwrap_or(0)
@@ -1387,11 +1398,11 @@ pub unsafe extern "C" fn wkhtmltoimage_progress_string(
 
 /// `wkhtmltoimage_http_error_code(converter)` → HTTP error code (0 = none).
 #[no_mangle]
-pub unsafe extern "C" fn wkhtmltoimage_http_error_code(
-    converter: *mut CImageConverter,
-) -> c_int {
+pub unsafe extern "C" fn wkhtmltoimage_http_error_code(converter: *mut CImageConverter) -> c_int {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if converter.is_null() { return 0; }
+        if converter.is_null() {
+            return 0;
+        }
         (*converter).http_error
     }))
     .unwrap_or(0)
@@ -1766,7 +1777,10 @@ mod tests {
             // Set A4 page size.
             let k = CString::new("size.pageSize").unwrap();
             let v = CString::new("A4").unwrap();
-            assert_eq!(wkhtmltopdf_set_global_setting(gs, k.as_ptr(), v.as_ptr()), 1);
+            assert_eq!(
+                wkhtmltopdf_set_global_setting(gs, k.as_ptr(), v.as_ptr()),
+                1
+            );
 
             let os = wkhtmltopdf_create_object_settings();
             assert!(!os.is_null());
@@ -1784,7 +1798,10 @@ mod tests {
             // Convert.
             let ok = wkhtmltopdf_convert(conv);
             assert_eq!(ok, 1, "convert should return 1");
-            assert!(FINISHED_OK.load(Ordering::Relaxed), "finished callback should have ok=1");
+            assert!(
+                FINISHED_OK.load(Ordering::Relaxed),
+                "finished callback should have ok=1"
+            );
 
             // Check output starts with %PDF.
             let mut out_ptr: *const c_uchar = std::ptr::null();
@@ -1891,7 +1908,10 @@ mod tests {
 
             let name = CString::new("fmt").unwrap();
             let val = CString::new("jpeg").unwrap();
-            assert_eq!(wkhtmltoimage_set_global_setting(gs, name.as_ptr(), val.as_ptr()), 1);
+            assert_eq!(
+                wkhtmltoimage_set_global_setting(gs, name.as_ptr(), val.as_ptr()),
+                1
+            );
 
             let mut buf = [0u8; 32];
             let r = wkhtmltoimage_get_global_setting(
@@ -1901,7 +1921,9 @@ mod tests {
                 32,
             );
             assert_eq!(r, 1);
-            let got = std::ffi::CStr::from_ptr(buf.as_ptr().cast::<c_char>()).to_str().unwrap();
+            let got = std::ffi::CStr::from_ptr(buf.as_ptr().cast::<c_char>())
+                .to_str()
+                .unwrap();
             assert_eq!(got, "jpeg");
 
             wkhtmltoimage_destroy_global_settings(gs);
@@ -2002,7 +2024,10 @@ mod tests {
             // Set PNG format.
             let k_fmt = std::ffi::CString::new("fmt").unwrap();
             let v_fmt = std::ffi::CString::new("png").unwrap();
-            assert_eq!(wkhtmltoimage_set_global_setting(gs, k_fmt.as_ptr(), v_fmt.as_ptr()), 1);
+            assert_eq!(
+                wkhtmltoimage_set_global_setting(gs, k_fmt.as_ptr(), v_fmt.as_ptr()),
+                1
+            );
 
             // Inline HTML data.
             let data = std::ffi::CString::new("<html><body><h1>Hi</h1></body></html>").unwrap();
@@ -2013,7 +2038,10 @@ mod tests {
 
             let ok = wkhtmltoimage_convert(conv);
             assert_eq!(ok, 1, "convert should return 1");
-            assert!(IMG_FINISHED_OK.load(Ordering::Relaxed), "finished callback should have ok=1");
+            assert!(
+                IMG_FINISHED_OK.load(Ordering::Relaxed),
+                "finished callback should have ok=1"
+            );
 
             // Check output starts with PNG magic bytes.
             let mut out_ptr: *const c_uchar = std::ptr::null();

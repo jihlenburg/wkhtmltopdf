@@ -89,9 +89,7 @@ fn build_min_pdf_with_outline() -> Vec<u8> {
 
     offsets[6] = buf.len();
     // /Dest [4 0 R /XYZ 0 0 0] — page 2 (obj 4, 0-based index 1), /XYZ destination
-    buf.push_str(
-        "6 0 obj\n<</Title(Deep)/Dest[4 0 R /XYZ 0 0 0]/Parent 5 0 R>>\nendobj\n",
-    );
+    buf.push_str("6 0 obj\n<</Title(Deep)/Dest[4 0 R /XYZ 0 0 0]/Parent 5 0 R>>\nendobj\n");
 
     let xref_offset = buf.len();
     buf.push_str(&format!("xref\n0 {}\n", N + 1));
@@ -123,10 +121,7 @@ fn pdf_string_to_str(bytes: &[u8]) -> String {
 
 #[test]
 fn assemble_two_objects_two_pages_each() {
-    let out = std::env::temp_dir().join(format!(
-        "wkx_asm_mock_{}.pdf",
-        std::process::id()
-    ));
+    let out = std::env::temp_dir().join(format!("wkx_asm_mock_{}.pdf", std::process::id()));
 
     // MockRenderer returns a valid 2-page PDF and a 1-heading probe per call.
     // Use field assignment after new() because `next` is a private field.
@@ -141,7 +136,10 @@ fn assemble_two_objects_two_pages_each() {
         &[Source::Html("a".into()), Source::Html("b".into())],
         &PageGeometry::default(),
         &out,
-        &AssembleOpts { number: true, ..Default::default() },
+        &AssembleOpts {
+            number: true,
+            ..Default::default()
+        },
     )
     .expect("assemble_pdf should succeed");
 
@@ -171,7 +169,10 @@ fn assemble_two_objects_two_pages_each() {
         .expect("/Outlines must have /Count")
         .as_i64()
         .expect("/Count must be integer");
-    assert_eq!(count, 2, "/Outlines /Count must be 2 (two top-level entries)");
+    assert_eq!(
+        count, 2,
+        "/Outlines /Count must be 2 (two top-level entries)"
+    );
 
     // Follow /First → first bookmark.
     let first_ref = outlines
@@ -262,10 +263,7 @@ fn assemble_two_objects_two_pages_each() {
 /// "Deep" bookmark in the output must reference page 2, not page 1.
 #[test]
 fn exact_page_from_engine_outline() {
-    let out = std::env::temp_dir().join(format!(
-        "wkx_asm_exact_{}.pdf",
-        std::process::id()
-    ));
+    let out = std::env::temp_dir().join(format!("wkx_asm_exact_{}.pdf", std::process::id()));
 
     let mut mock = MockRenderer::new();
     // 2-page PDF with /Outlines "Deep" → page 2 (0-based: 1)
@@ -356,10 +354,7 @@ fn exact_page_from_engine_outline() {
 /// Page 1 should contain "(1/4)" and page 4 should contain "(4/4)".
 #[test]
 fn assemble_footer_center_page_of_topage() {
-    let out = std::env::temp_dir().join(format!(
-        "wkx_footer_cells_{}.pdf",
-        std::process::id()
-    ));
+    let out = std::env::temp_dir().join(format!("wkx_footer_cells_{}.pdf", std::process::id()));
 
     let mut mock = MockRenderer::new();
     mock.pdf = min_pdf_bytes(2);

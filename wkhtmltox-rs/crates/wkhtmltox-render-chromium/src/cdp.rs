@@ -1,8 +1,8 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
-use std::time::{Duration, Instant};
-use tungstenite::{connect as ws_connect, Message, WebSocket};
-use tungstenite::stream::MaybeTlsStream;
 use std::net::TcpStream;
+use std::time::{Duration, Instant};
+use tungstenite::stream::MaybeTlsStream;
+use tungstenite::{connect as ws_connect, Message, WebSocket};
 use wkhtmltox_core::{Result, WkError};
 
 /// Maximum time a single CDP command is allowed to wait for a response.
@@ -28,11 +28,19 @@ pub fn request_frame(id: u64, method: &str, params: &serde_json::Value) -> Strin
 }
 
 /// Classify an incoming CDP frame: Some((id, result_or_error)) for responses, None for events.
-pub fn parse_response(txt: &str, want_id: u64) -> Option<std::result::Result<serde_json::Value, String>> {
+pub fn parse_response(
+    txt: &str,
+    want_id: u64,
+) -> Option<std::result::Result<serde_json::Value, String>> {
     let v: serde_json::Value = serde_json::from_str(txt).ok()?;
     if v.get("id").and_then(|x| x.as_u64()) == Some(want_id) {
-        if let Some(err) = v.get("error") { return Some(Err(err.to_string())); }
-        return Some(Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null)));
+        if let Some(err) = v.get("error") {
+            return Some(Err(err.to_string()));
+        }
+        return Some(Ok(v
+            .get("result")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)));
     }
     None
 }
@@ -187,9 +195,7 @@ impl Cdp {
                 Ok(m) => m,
                 Err(e) if is_read_timeout(&e) => {
                     if Instant::now() >= deadline {
-                        return Err(WkError::Engine(format!(
-                            "cdp call timeout: {method}"
-                        )));
+                        return Err(WkError::Engine(format!("cdp call timeout: {method}")));
                     }
                     continue;
                 }
@@ -200,9 +206,7 @@ impl Cdp {
                     return res.map_err(WkError::Engine);
                 }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
-                    if v.get("method").and_then(|m| m.as_str())
-                        == Some("Fetch.requestPaused")
-                    {
+                    if v.get("method").and_then(|m| m.as_str()) == Some("Fetch.requestPaused") {
                         if let Ok(cmds) = on_fetch(&v) {
                             for (m, p) in cmds {
                                 let _ = self.send_only(&m, p);
@@ -233,14 +237,21 @@ impl Cdp {
                 }
             }
         }
-        Err(WkError::Engine(format!("timeout waiting for event {method}")))
+        Err(WkError::Engine(format!(
+            "timeout waiting for event {method}"
+        )))
     }
 }
 
 pub fn connect(ws_url: &str) -> Result<Cdp> {
-    let (mut sock, _resp) = ws_connect(ws_url).map_err(|e| WkError::Engine(format!("cdp connect: {e}")))?;
+    let (mut sock, _resp) =
+        ws_connect(ws_url).map_err(|e| WkError::Engine(format!("cdp connect: {e}")))?;
     set_poll_timeout(&mut sock);
-    Ok(Cdp { sock, next_id: 0, msg_buf: Vec::new() })
+    Ok(Cdp {
+        sock,
+        next_id: 0,
+        msg_buf: Vec::new(),
+    })
 }
 
 #[cfg(test)]

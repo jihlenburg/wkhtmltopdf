@@ -32,14 +32,17 @@ fn main() {
     let input = PathBuf::from(positional[0]);
     let output = PathBuf::from(positional[1]);
 
-    let abs_input = input
-        .canonicalize()
-        .unwrap_or_else(|e| { eprintln!("cannot resolve input path: {e}"); std::process::exit(1); });
+    let abs_input = input.canonicalize().unwrap_or_else(|e| {
+        eprintln!("cannot resolve input path: {e}");
+        std::process::exit(1);
+    });
 
     let url = format!("file://{}", abs_input.display());
 
-    let mut renderer = ChromiumRenderer::spawn()
-        .unwrap_or_else(|e| { eprintln!("failed to spawn ChromiumRenderer: {e}"); std::process::exit(1); });
+    let mut renderer = ChromiumRenderer::spawn().unwrap_or_else(|e| {
+        eprintln!("failed to spawn ChromiumRenderer: {e}");
+        std::process::exit(1);
+    });
 
     let compat_ua_css = if compat {
         Some(wkhtmltox_core::compat::WK0126_UA_RESET.to_string())
@@ -57,11 +60,17 @@ fn main() {
                 ..Default::default()
             },
         )
-        .unwrap_or_else(|e| { eprintln!("open failed: {e}"); std::process::exit(1); });
+        .unwrap_or_else(|e| {
+            eprintln!("open failed: {e}");
+            std::process::exit(1);
+        });
 
     renderer
         .wait_ready(page, &ReadyPolicy::default())
-        .unwrap_or_else(|e| { eprintln!("wait_ready failed: {e}"); std::process::exit(1); });
+        .unwrap_or_else(|e| {
+            eprintln!("wait_ready failed: {e}");
+            std::process::exit(1);
+        });
 
     let geom = PageGeometry {
         width_mm: 210.0,
@@ -77,12 +86,15 @@ fn main() {
         generate_document_outline: true,
     };
 
-    let pdf_bytes = renderer
-        .print_pdf(page, &geom)
-        .unwrap_or_else(|e| { eprintln!("print_pdf failed: {e}"); std::process::exit(1); });
+    let pdf_bytes = renderer.print_pdf(page, &geom).unwrap_or_else(|e| {
+        eprintln!("print_pdf failed: {e}");
+        std::process::exit(1);
+    });
 
-    std::fs::write(&output, &pdf_bytes)
-        .unwrap_or_else(|e| { eprintln!("write output failed: {e}"); std::process::exit(1); });
+    std::fs::write(&output, &pdf_bytes).unwrap_or_else(|e| {
+        eprintln!("write output failed: {e}");
+        std::process::exit(1);
+    });
 
     eprintln!("wrote {} bytes -> {}", pdf_bytes.len(), output.display());
 }

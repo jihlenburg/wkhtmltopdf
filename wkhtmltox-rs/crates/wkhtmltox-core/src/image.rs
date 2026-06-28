@@ -65,7 +65,11 @@ fn composite_over_white(rgba: &img::RgbaImage) -> img::RgbImage {
     for (x, y, pix) in rgba.enumerate_pixels() {
         let a = pix[3] as f32 / 255.0;
         let blend = |c: u8| (c as f32 * a + 255.0 * (1.0 - a)).round() as u8;
-        flat.put_pixel(x, y, img::Rgb([blend(pix[0]), blend(pix[1]), blend(pix[2])]));
+        flat.put_pixel(
+            x,
+            y,
+            img::Rgb([blend(pix[0]), blend(pix[1]), blend(pix[2])]),
+        );
     }
     flat
 }
@@ -96,15 +100,9 @@ pub fn produce(raw: &RawImage, opts: &ImageOpts) -> Result<Vec<u8>> {
 
     // ── Step 3: resize ────────────────────────────────────────────────────────
     dynimg = match (opts.width, opts.height) {
-        (Some(w), Some(h)) => {
-            dynimg.resize_exact(w, h, img::imageops::FilterType::Lanczos3)
-        }
-        (Some(w), None) => {
-            dynimg.resize(w, u32::MAX, img::imageops::FilterType::Lanczos3)
-        }
-        (None, Some(h)) => {
-            dynimg.resize(u32::MAX, h, img::imageops::FilterType::Lanczos3)
-        }
+        (Some(w), Some(h)) => dynimg.resize_exact(w, h, img::imageops::FilterType::Lanczos3),
+        (Some(w), None) => dynimg.resize(w, u32::MAX, img::imageops::FilterType::Lanczos3),
+        (None, Some(h)) => dynimg.resize(u32::MAX, h, img::imageops::FilterType::Lanczos3),
         (None, None) => dynimg,
     };
 
@@ -126,10 +124,7 @@ pub fn produce(raw: &RawImage, opts: &ImageOpts) -> Result<Vec<u8>> {
             // JPEG has no alpha channel; composite over white (matches the PNG
             // non-transparent path) so transparency flattens to white, never black.
             let rgb = img::DynamicImage::ImageRgb8(composite_over_white(&dynimg.to_rgba8()));
-            let encoder = img::codecs::jpeg::JpegEncoder::new_with_quality(
-                &mut buf,
-                opts.quality,
-            );
+            let encoder = img::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, opts.quality);
             rgb.write_with_encoder(encoder)
                 .map_err(|e| WkError::Render(format!("jpeg encode: {e}")))?;
         }
@@ -143,10 +138,10 @@ pub fn produce(raw: &RawImage, opts: &ImageOpts) -> Result<Vec<u8>> {
 /// real parseable PNG rather than arbitrary bytes.
 pub fn tiny_png() -> Vec<u8> {
     let mut imgbuf = img::RgbaImage::new(2, 2);
-    imgbuf.put_pixel(0, 0, img::Rgba([255,   0,   0, 255])); // opaque red
-    imgbuf.put_pixel(1, 0, img::Rgba([  0, 255,   0, 128])); // semi green
-    imgbuf.put_pixel(0, 1, img::Rgba([  0,   0, 255,  64])); // translucent blue
-    imgbuf.put_pixel(1, 1, img::Rgba([255, 255, 255,   0])); // transparent white
+    imgbuf.put_pixel(0, 0, img::Rgba([255, 0, 0, 255])); // opaque red
+    imgbuf.put_pixel(1, 0, img::Rgba([0, 255, 0, 128])); // semi green
+    imgbuf.put_pixel(0, 1, img::Rgba([0, 0, 255, 64])); // translucent blue
+    imgbuf.put_pixel(1, 1, img::Rgba([255, 255, 255, 0])); // transparent white
     let dyn_img = img::DynamicImage::ImageRgba8(imgbuf);
     let mut bytes: Vec<u8> = Vec::new();
     let mut cursor = Cursor::new(&mut bytes);
@@ -186,8 +181,14 @@ mod tests {
     #[test]
     fn produce_png_resize_to_width() {
         let png_bytes = make_png_100x100();
-        let raw = RawImage { bytes: png_bytes, format: ImageFormat::Png };
-        let opts = ImageOpts { width: Some(50), ..Default::default() };
+        let raw = RawImage {
+            bytes: png_bytes,
+            format: ImageFormat::Png,
+        };
+        let opts = ImageOpts {
+            width: Some(50),
+            ..Default::default()
+        };
         let out = produce(&raw, &opts).expect("produce");
 
         // Must start with PNG magic.
@@ -203,7 +204,10 @@ mod tests {
     #[test]
     fn produce_jpeg_format() {
         let png_bytes = make_png_100x100();
-        let raw = RawImage { bytes: png_bytes, format: ImageFormat::Png };
+        let raw = RawImage {
+            bytes: png_bytes,
+            format: ImageFormat::Png,
+        };
         let opts = ImageOpts {
             format: ImageFormat::Jpeg,
             quality: 80,
@@ -217,7 +221,10 @@ mod tests {
     #[test]
     fn produce_transparent_false_flattens_alpha() {
         let png_bytes = make_transparent_png();
-        let raw = RawImage { bytes: png_bytes, format: ImageFormat::Png };
+        let raw = RawImage {
+            bytes: png_bytes,
+            format: ImageFormat::Png,
+        };
         let opts = ImageOpts {
             transparent: false,
             ..Default::default()
@@ -239,8 +246,15 @@ mod tests {
     #[test]
     fn produce_both_width_and_height_exact() {
         let png_bytes = make_png_100x100();
-        let raw = RawImage { bytes: png_bytes, format: ImageFormat::Png };
-        let opts = ImageOpts { width: Some(30), height: Some(40), ..Default::default() };
+        let raw = RawImage {
+            bytes: png_bytes,
+            format: ImageFormat::Png,
+        };
+        let opts = ImageOpts {
+            width: Some(30),
+            height: Some(40),
+            ..Default::default()
+        };
         let out = produce(&raw, &opts).expect("produce exact resize");
         let decoded = img::load_from_memory(&out).expect("decode");
         assert_eq!(decoded.width(), 30);
@@ -250,7 +264,10 @@ mod tests {
     #[test]
     fn produce_crop_then_resize() {
         let png_bytes = make_png_100x100();
-        let raw = RawImage { bytes: png_bytes, format: ImageFormat::Png };
+        let raw = RawImage {
+            bytes: png_bytes,
+            format: ImageFormat::Png,
+        };
         // Crop to 60×60 at (10,10), then resize width to 30.
         let opts = ImageOpts {
             crop: Some((10, 10, 60, 60)),
@@ -277,17 +294,33 @@ mod tests {
         // A fully transparent RGBA pixel must encode as white (255), not black,
         // on the JPEG path (JPEG has no alpha; raw to_rgb8 would drop to 0,0,0).
         let mut rgba = img::RgbaImage::new(2, 2);
-        for px in rgba.pixels_mut() { *px = img::Rgba([0, 0, 0, 0]); } // transparent black
+        for px in rgba.pixels_mut() {
+            *px = img::Rgba([0, 0, 0, 0]);
+        } // transparent black
         let mut png_buf = Cursor::new(Vec::new());
         img::DynamicImage::ImageRgba8(rgba)
             .write_to(&mut png_buf, img::ImageFormat::Png)
             .unwrap();
-        let raw = RawImage { bytes: png_buf.into_inner(), format: ImageFormat::Png };
-        let opts = ImageOpts { format: ImageFormat::Jpeg, transparent: false, quality: 90,
-                               width: None, height: None, crop: None, zoom: 1.0, screen_width: None };
+        let raw = RawImage {
+            bytes: png_buf.into_inner(),
+            format: ImageFormat::Png,
+        };
+        let opts = ImageOpts {
+            format: ImageFormat::Jpeg,
+            transparent: false,
+            quality: 90,
+            width: None,
+            height: None,
+            crop: None,
+            zoom: 1.0,
+            screen_width: None,
+        };
         let out = produce(&raw, &opts).unwrap();
         let decoded = img::load_from_memory(&out).unwrap().to_rgb8();
         let p = decoded.get_pixel(0, 0);
-        assert!(p[0] > 240 && p[1] > 240 && p[2] > 240, "transparent→white, got {p:?}");
+        assert!(
+            p[0] > 240 && p[1] > 240 && p[2] > 240,
+            "transparent→white, got {p:?}"
+        );
     }
 }

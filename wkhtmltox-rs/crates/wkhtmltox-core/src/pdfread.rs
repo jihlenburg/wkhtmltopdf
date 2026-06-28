@@ -52,7 +52,14 @@ pub fn extract_named_dests(pdf_path: &Path) -> HashMap<String, u32> {
 
     // ── Path 1: /Names /Dests name-tree ──────────────────────────────────────
     if let Some(root_id) = catalog_names_dests_root(&doc) {
-        walk_name_tree(&doc, root_id, &page_map, &mut result, &mut HashSet::new(), 0);
+        walk_name_tree(
+            &doc,
+            root_id,
+            &page_map,
+            &mut result,
+            &mut HashSet::new(),
+            0,
+        );
     }
 
     // ── Path 2: /Dests flat dict in catalog (legacy) ─────────────────────────
@@ -102,7 +109,9 @@ fn walk_name_tree(
     // Extract /Names pairs and /Kids refs as owned data so the borrow on `doc`
     // is released before the recursive call.
     let (name_pairs, kid_refs) = {
-        let Ok(obj) = doc.get_object(node_id) else { return };
+        let Ok(obj) = doc.get_object(node_id) else {
+            return;
+        };
         let Ok(dict) = obj.as_dict() else { return };
 
         // Leaf node: /Names [name dest name dest ...]
@@ -157,14 +166,18 @@ fn catalog_dests_flat(
     // Get /Dests object-id from catalog.
     let dests_id: lopdf::ObjectId = {
         let Ok(catalog) = doc.catalog() else { return };
-        let Ok(val) = catalog.get(b"Dests") else { return };
+        let Ok(val) = catalog.get(b"Dests") else {
+            return;
+        };
         let Ok(id) = val.as_reference() else { return };
         id
     };
 
     // Extract all (key, value) pairs as owned data.
     let pairs: Vec<(Vec<u8>, Object)> = {
-        let Ok(obj) = doc.get_object(dests_id) else { return };
+        let Ok(obj) = doc.get_object(dests_id) else {
+            return;
+        };
         let Ok(dict) = obj.as_dict() else { return };
         dict.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     };
@@ -247,7 +260,15 @@ pub fn extract_outline(pdf_path: &Path) -> Vec<(String, u32, u8)> {
     // Outlines-dict borrow released here.
 
     let mut result = Vec::new();
-    walk_outline(&doc, first_ref, 1, &page_id_to_index, &mut result, &mut HashSet::new(), 0);
+    walk_outline(
+        &doc,
+        first_ref,
+        1,
+        &page_id_to_index,
+        &mut result,
+        &mut HashSet::new(),
+        0,
+    );
     result
 }
 
@@ -319,7 +340,15 @@ fn walk_outline(
 
         // Recurse into children before advancing to the next sibling.
         if let Some(child_ref) = first_child {
-            walk_outline(doc, child_ref, level.saturating_add(1), page_id_to_index, out, visited, depth + 1);
+            walk_outline(
+                doc,
+                child_ref,
+                level.saturating_add(1),
+                page_id_to_index,
+                out,
+                visited,
+                depth + 1,
+            );
         }
 
         match next_sibling {
@@ -392,8 +421,7 @@ mod tests {
 
     #[test]
     fn extract_named_dests_finds_x_on_page2() {
-        let tmp = std::env::temp_dir()
-            .join(format!("wkx_ndr_{}.pdf", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wkx_ndr_{}.pdf", std::process::id()));
         std::fs::write(&tmp, build_pdf_with_named_dest()).unwrap();
 
         let dests = extract_named_dests(&tmp);
@@ -464,8 +492,8 @@ mod tests {
     /// guard must break the chain after the first visit to each node.
     #[test]
     fn extract_outline_cyclic_next_does_not_hang() {
-        let tmp = std::env::temp_dir()
-            .join(format!("wkx_cyclic_outline_{}.pdf", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("wkx_cyclic_outline_{}.pdf", std::process::id()));
         std::fs::write(&tmp, build_cyclic_outline_pdf()).unwrap();
 
         // Must return immediately; a regression would spin forever (CI timeout
@@ -481,8 +509,7 @@ mod tests {
 
     #[test]
     fn extract_named_dests_on_no_dests_pdf_returns_empty() {
-        let tmp = std::env::temp_dir()
-            .join(format!("wkx_ndr_empty_{}.pdf", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wkx_ndr_empty_{}.pdf", std::process::id()));
         // A 2-page PDF with no /Names or /Dests.
         let n_objs = 4usize;
         let mut buf = String::new();

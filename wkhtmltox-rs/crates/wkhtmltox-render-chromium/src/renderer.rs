@@ -10,13 +10,13 @@ use std::time::{Duration, Instant};
 /// back-to-back spawns reuse the same path; the second Chrome can pick up stale
 /// lock files from the still-terminating first instance.
 static SPAWN_COUNTER: AtomicU64 = AtomicU64::new(0);
+use crate::cdp::{connect, Cdp};
+use crate::launch::{find_chrome, launch_args};
 use base64::Engine as _; // see note in Step 4 about the base64 dep
 use serde_json::json;
 use wkhtmltox_core::policy::ResourcePolicy;
 use wkhtmltox_core::render::*;
 use wkhtmltox_core::{Result, WkError};
-use crate::cdp::{connect, Cdp};
-use crate::launch::{find_chrome, launch_args};
 
 /// Options for spawning a `ChromiumRenderer`.
 ///
@@ -39,7 +39,9 @@ struct SpawnGuard {
 
 impl SpawnGuard {
     fn new(child: Child, udd: PathBuf) -> Self {
-        Self { inner: Some((child, udd)) }
+        Self {
+            inner: Some((child, udd)),
+        }
     }
     /// Consume the guard without triggering cleanup; returns the owned fields.
     fn disarm(mut self) -> (Child, PathBuf) {
@@ -113,7 +115,9 @@ impl ChromiumRenderer {
     }
 }
 
-fn mm_to_in(mm: f64) -> f64 { mm / 25.4 }
+fn mm_to_in(mm: f64) -> f64 {
+    mm / 25.4
+}
 
 // ---------------------------------------------------------------------------
 // ResourcePolicy enforcement helpers
@@ -230,10 +234,7 @@ fn build_continue_params(
     extra_headers: &[(String, String)],
 ) -> serde_json::Value {
     if !extra_headers.is_empty() && same_origin(req_url, nav_url) {
-        let mut headers = original_headers
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let mut headers = original_headers.as_object().cloned().unwrap_or_default();
         for (name, value) in extra_headers {
             headers.insert(name.clone(), serde_json::Value::String(value.clone()));
         }
@@ -282,7 +283,11 @@ fn handle_fetch_event(
     // C1b: top-level document — allow unconditionally.
     if resource_type == "Document" && req_url == nav_url {
         let cp = build_continue_params(
-            &request_id, &req_url, original_headers, nav_url, extra_headers,
+            &request_id,
+            &req_url,
+            original_headers,
+            nav_url,
+            extra_headers,
         );
         return Ok(vec![("Fetch.continueRequest".into(), cp)]);
     }
@@ -290,10 +295,13 @@ fn handle_fetch_event(
     // Image block: checked BEFORE policy so it can only ADD blocks, never remove them.
     if !load_images && resource_type == "Image" {
         blocked.push(req_url);
-        return Ok(vec![("Fetch.failRequest".into(), json!({
-            "requestId": request_id,
-            "errorReason": "BlockedByClient",
-        }))]);
+        return Ok(vec![(
+            "Fetch.failRequest".into(),
+            json!({
+                "requestId": request_id,
+                "errorReason": "BlockedByClient",
+            }),
+        )]);
     }
 
     let is_redirect = params
@@ -305,16 +313,23 @@ fn handle_fetch_event(
     match fetch_action(policy, &req_url, is_redirect) {
         FetchDecision::Continue => {
             let cp = build_continue_params(
-                &request_id, &req_url, original_headers, nav_url, extra_headers,
+                &request_id,
+                &req_url,
+                original_headers,
+                nav_url,
+                extra_headers,
             );
             Ok(vec![("Fetch.continueRequest".into(), cp)])
         }
         FetchDecision::Fail => {
             blocked.push(req_url);
-            Ok(vec![("Fetch.failRequest".into(), json!({
-                "requestId": request_id,
-                "errorReason": "Aborted",
-            }))])
+            Ok(vec![(
+                "Fetch.failRequest".into(),
+                json!({
+                    "requestId": request_id,
+                    "errorReason": "Aborted",
+                }),
+            )])
         }
     }
 }
@@ -324,15 +339,13 @@ impl ChromiumRenderer {
         Self::spawn_opts(SpawnOpts::default())
     }
 
-
     pub fn spawn_opts(opts: SpawnOpts) -> Result<Self> {
         let chrome = find_chrome().ok_or_else(|| WkError::Engine("no chrome found".into()))?;
 
         // Each spawn within the same process gets a unique user-data-dir so that
         // rapid back-to-back spawns never share or race over the same directory.
         let spawn_n = SPAWN_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let udd = std::env::temp_dir()
-            .join(format!("wkx-cdp-{}-{}", std::process::id(), spawn_n));
+        let udd = std::env::temp_dir().join(format!("wkx-cdp-{}-{}", std::process::id(), spawn_n));
         let udd_str = udd.to_string_lossy().to_string();
 
         // Use port=0 so the OS assigns a free ephemeral port.
@@ -361,8 +374,8 @@ impl ChromiumRenderer {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        let port = port
-            .ok_or_else(|| WkError::Engine("DevToolsActivePort never appeared".into()))?;
+        let port =
+            port.ok_or_else(|| WkError::Engine("DevToolsActivePort never appeared".into()))?;
 
         // ── Step 2: Discover a page target's websocket URL via the /json endpoint.
         // Budget: 60 × 200 ms = 12 s.
@@ -384,8 +397,8 @@ impl ChromiumRenderer {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
-        let ws_url = ws_url
-            .ok_or_else(|| WkError::Engine("devtools endpoint never appeared".into()))?;
+        let ws_url =
+            ws_url.ok_or_else(|| WkError::Engine("devtools endpoint never appeared".into()))?;
 
         // ── Step 3: Open the CDP WebSocket with bounded retry + backoff.
         //
@@ -399,7 +412,10 @@ impl ChromiumRenderer {
             let mut connected = None;
             for attempt in 0..MAX_CONNECT_ATTEMPTS {
                 match connect(&ws_url) {
-                    Ok(c) => { connected = Some(c); break; }
+                    Ok(c) => {
+                        connected = Some(c);
+                        break;
+                    }
                     Err(e) => {
                         last_err = Some(e);
                         if attempt + 1 < MAX_CONNECT_ATTEMPTS {
@@ -458,7 +474,14 @@ impl ChromiumRenderer {
         let mut new_blocked: Vec<String> = Vec::new();
 
         let result = self.cdp.call_pumping(method, params, |msg| {
-            handle_fetch_event(msg, &policy, &nav_url, &extra_headers, load_images, &mut new_blocked)
+            handle_fetch_event(
+                msg,
+                &policy,
+                &nav_url,
+                &extra_headers,
+                load_images,
+                &mut new_blocked,
+            )
         })?;
 
         self.blocked_urls.extend(new_blocked);
@@ -508,8 +531,11 @@ impl Renderer for ChromiumRenderer {
                 self._html_temp = Some(tmp);
                 file_url
             }
-            Source::Stdin =>
-                return Err(WkError::Engine("Stdin source not supported by ChromiumRenderer".into())),
+            Source::Stdin => {
+                return Err(WkError::Engine(
+                    "Stdin source not supported by ChromiumRenderer".into(),
+                ))
+            }
         };
 
         // ── Cleanup from previous page ────────────────────────────────────────
@@ -539,8 +565,7 @@ impl Renderer for ChromiumRenderer {
             let mut h = load.custom_headers.clone();
             if let (Some(u), Some(p)) = (load.username.as_deref(), load.password.as_deref()) {
                 let creds = format!("{u}:{p}");
-                let encoded =
-                    base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
+                let encoded = base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
                 h.push(("Authorization".into(), format!("Basic {encoded}")));
             }
             h
@@ -550,9 +575,7 @@ impl Renderer for ChromiumRenderer {
         self.cdp.call("Network.enable", json!({}))?;
 
         // Cookies require an http(s) origin; skip for file://, data:, etc.
-        if !load.cookies.is_empty()
-            && (url.starts_with("http://") || url.starts_with("https://"))
-        {
+        if !load.cookies.is_empty() && (url.starts_with("http://") || url.starts_with("https://")) {
             let params = build_cookies_params(&load.cookies, &url);
             self.cdp.call("Network.setCookies", params)?;
         }
@@ -562,11 +585,17 @@ impl Renderer for ChromiumRenderer {
 
         if load.no_check_certificate {
             self.cdp.call("Security.enable", json!({}))?;
-            self.cdp.call("Security.setIgnoreCertificateErrors", json!({ "ignore": true }))?;
+            self.cdp.call(
+                "Security.setIgnoreCertificateErrors",
+                json!({ "ignore": true }),
+            )?;
         }
 
         if !load.enable_javascript {
-            self.cdp.call("Emulation.setScriptExecutionDisabled", json!({ "value": true }))?;
+            self.cdp.call(
+                "Emulation.setScriptExecutionDisabled",
+                json!({ "value": true }),
+            )?;
         }
 
         // ── Viewport / device-scale override (Emulation.setDeviceMetricsOverride) ─
@@ -598,10 +627,13 @@ impl Renderer for ChromiumRenderer {
         //   - call() blocks waiting for the Page.navigate response
         //   - Chrome waits for us to send continueRequest/failRequest first
         //   - Neither can proceed → 60-second timeout
-        self.cdp.call("Fetch.enable", json!({
-            "patterns": [{ "urlPattern": "*" }],
-            "handleAuthRequests": false
-        }))?;
+        self.cdp.call(
+            "Fetch.enable",
+            json!({
+                "patterns": [{ "urlPattern": "*" }],
+                "handleAuthRequests": false
+            }),
+        )?;
 
         self.cdp.send_only("Page.navigate", json!({ "url": url }))?;
 
@@ -625,7 +657,7 @@ impl Renderer for ChromiumRenderer {
                 let _ = self.cdp.send_only("Fetch.disable", json!({}));
                 self.fetch_state = None;
                 return Err(WkError::Engine(
-                    "timeout waiting for Page.loadEventFired".into()
+                    "timeout waiting for Page.loadEventFired".into(),
                 ));
             }
 
@@ -640,14 +672,9 @@ impl Renderer for ChromiumRenderer {
             match msg.get("method").and_then(|m| m.as_str()) {
                 Some("Fetch.requestPaused") => {
                     let params = &msg["params"];
-                    let request_id =
-                        params["requestId"].as_str().unwrap_or("").to_string();
-                    let req_url = params["request"]["url"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
-                    let resource_type =
-                        params["resourceType"].as_str().unwrap_or("");
+                    let request_id = params["requestId"].as_str().unwrap_or("").to_string();
+                    let req_url = params["request"]["url"].as_str().unwrap_or("").to_string();
+                    let resource_type = params["resourceType"].as_str().unwrap_or("");
                     let original_headers = &params["request"]["headers"];
                     let is_redirect = params
                         .get("responseStatusCode")
@@ -658,8 +685,11 @@ impl Renderer for ChromiumRenderer {
                     // C1b: allow top-level document unconditionally.
                     if resource_type == "Document" && req_url == url {
                         let cp = build_continue_params(
-                            &request_id, &req_url, original_headers,
-                            &url, &extra_headers,
+                            &request_id,
+                            &req_url,
+                            original_headers,
+                            &url,
+                            &extra_headers,
                         );
                         self.cdp.send_only("Fetch.continueRequest", cp)?;
                     } else if !load.load_images && resource_type == "Image" {
@@ -676,8 +706,11 @@ impl Renderer for ChromiumRenderer {
                         match fetch_action(&load.policy, &req_url, is_redirect) {
                             FetchDecision::Continue => {
                                 let cp = build_continue_params(
-                                    &request_id, &req_url, original_headers,
-                                    &url, &extra_headers,
+                                    &request_id,
+                                    &req_url,
+                                    original_headers,
+                                    &url,
+                                    &extra_headers,
                                 );
                                 self.cdp.send_only("Fetch.continueRequest", cp)?;
                             }
@@ -729,7 +762,9 @@ impl Renderer for ChromiumRenderer {
                 break;
             }
             if Instant::now() >= deadline {
-                return Err(WkError::Engine("timeout waiting for readyState=complete".into()));
+                return Err(WkError::Engine(
+                    "timeout waiting for readyState=complete".into(),
+                ));
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -771,9 +806,9 @@ impl Renderer for ChromiumRenderer {
                     break;
                 }
                 if Instant::now() >= deadline2 {
-                    return Err(WkError::Engine(
-                        format!("timeout waiting for window.status={wanted:?}")
-                    ));
+                    return Err(WkError::Engine(format!(
+                        "timeout waiting for window.status={wanted:?}"
+                    )));
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -795,13 +830,20 @@ impl Renderer for ChromiumRenderer {
                     let scroll_w = scroll_w as u32;
                     if scroll_w > configured_w {
                         let h = if dm.height > 0 { dm.height } else { 0 };
-                        let dsf = if dm.device_scale_factor > 0.0 { dm.device_scale_factor } else { 1.0 };
+                        let dsf = if dm.device_scale_factor > 0.0 {
+                            dm.device_scale_factor
+                        } else {
+                            1.0
+                        };
                         // Best-effort: ignore errors (viewport expansion is non-critical).
-                        let _ = self.call_pumping("Emulation.setDeviceMetricsOverride", json!({
-                            "width": scroll_w, "height": h,
-                            "deviceScaleFactor": dsf,
-                            "mobile": false
-                        }));
+                        let _ = self.call_pumping(
+                            "Emulation.setDeviceMetricsOverride",
+                            json!({
+                                "width": scroll_w, "height": h,
+                                "deviceScaleFactor": dsf,
+                                "mobile": false
+                            }),
+                        );
                     }
                 }
             }
@@ -811,8 +853,10 @@ impl Renderer for ChromiumRenderer {
     }
 
     fn eval_json(&mut self, _p: PageHandle, script: &str) -> Result<serde_json::Value> {
-        let r = self.cdp.call("Runtime.evaluate",
-            json!({ "expression": script, "returnByValue": true }))?;
+        let r = self.cdp.call(
+            "Runtime.evaluate",
+            json!({ "expression": script, "returnByValue": true }),
+        )?;
         Ok(r["result"]["value"].clone())
     }
 
@@ -823,22 +867,27 @@ impl Renderer for ChromiumRenderer {
         };
         // Use call_pumping so that any Fetch.requestPaused events Chrome fires
         // during PDF rendering (e.g. lazy-loaded images) are serviced inline.
-        let r = self.call_pumping("Page.printToPDF", json!({
-            "printBackground": g.print_background,
-            "preferCSSPageSize": g.prefer_css_page_size,
-            "generateDocumentOutline": g.generate_document_outline,
-            "paperWidth": w, "paperHeight": h,
-            "marginTop": mm_to_in(g.margin_top_mm),
-            "marginBottom": mm_to_in(g.margin_bottom_mm),
-            "marginLeft": mm_to_in(g.margin_left_mm),
-            "marginRight": mm_to_in(g.margin_right_mm),
-            "scale": g.scale,
-            "transferMode": "ReturnAsBase64",
-        }))?;
+        let r = self.call_pumping(
+            "Page.printToPDF",
+            json!({
+                "printBackground": g.print_background,
+                "preferCSSPageSize": g.prefer_css_page_size,
+                "generateDocumentOutline": g.generate_document_outline,
+                "paperWidth": w, "paperHeight": h,
+                "marginTop": mm_to_in(g.margin_top_mm),
+                "marginBottom": mm_to_in(g.margin_bottom_mm),
+                "marginLeft": mm_to_in(g.margin_left_mm),
+                "marginRight": mm_to_in(g.margin_right_mm),
+                "scale": g.scale,
+                "transferMode": "ReturnAsBase64",
+            }),
+        )?;
 
-        let b64 = r["data"].as_str()
+        let b64 = r["data"]
+            .as_str()
             .ok_or_else(|| WkError::Pdf("printToPDF: no data".into()))?;
-        let pdf = base64::engine::general_purpose::STANDARD.decode(b64)
+        let pdf = base64::engine::general_purpose::STANDARD
+            .decode(b64)
             .map_err(|e| WkError::Pdf(format!("b64 decode: {e}")))?;
 
         // Page is done — disable Fetch interception.
@@ -850,7 +899,7 @@ impl Renderer for ChromiumRenderer {
 
     fn snapshot(&mut self, _p: PageHandle, o: &SnapshotOpts) -> Result<RawImage> {
         let fmt_str = match o.format {
-            ImageFormat::Png  => "png",
+            ImageFormat::Png => "png",
             ImageFormat::Jpeg => "jpeg",
         };
 
@@ -883,7 +932,8 @@ impl Renderer for ChromiumRenderer {
         // inline and policy enforcement remains active.
         let r = self.call_pumping("Page.captureScreenshot", params)?;
 
-        let b64 = r["data"].as_str()
+        let b64 = r["data"]
+            .as_str()
             .ok_or_else(|| WkError::Render("captureScreenshot: no data field".into()))?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(b64)
@@ -893,10 +943,15 @@ impl Renderer for ChromiumRenderer {
         let _ = self.cdp.send_only("Fetch.disable", json!({}));
         self.fetch_state = None;
 
-        Ok(RawImage { bytes, format: o.format })
+        Ok(RawImage {
+            bytes,
+            format: o.format,
+        })
     }
     fn page_info(&self, _p: PageHandle) -> Result<PageInfo> {
-        Err(WkError::Engine("page_info lands in a later milestone".into()))
+        Err(WkError::Engine(
+            "page_info lands in a later milestone".into(),
+        ))
     }
 }
 
@@ -1022,8 +1077,13 @@ mod tests {
             .expect("should produce Some when headers+auth present");
         let hdrs = &p["headers"];
         assert_eq!(hdrs["X-Custom"].as_str().unwrap(), "header-val");
-        let auth = hdrs["Authorization"].as_str().expect("Authorization must be present");
-        assert!(auth.starts_with("Basic "), "auth header must start with 'Basic '");
+        let auth = hdrs["Authorization"]
+            .as_str()
+            .expect("Authorization must be present");
+        assert!(
+            auth.starts_with("Basic "),
+            "auth header must start with 'Basic '"
+        );
         let b64 = auth.strip_prefix("Basic ").unwrap();
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(b64)
@@ -1034,7 +1094,10 @@ mod tests {
     #[test]
     fn extra_headers_params_none_when_empty() {
         let result = build_extra_headers_params(&[], None, None);
-        assert!(result.is_none(), "must return None when there is nothing to set");
+        assert!(
+            result.is_none(),
+            "must return None when there is nothing to set"
+        );
     }
 
     #[test]

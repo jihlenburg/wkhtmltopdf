@@ -105,10 +105,7 @@ impl ResourcePolicy {
         let colon = match url.find(':') {
             Some(pos) => pos,
             None => {
-                return Decision::Block(format!(
-                    "blocked: no scheme found in URL {:?}",
-                    url
-                ));
+                return Decision::Block(format!("blocked: no scheme found in URL {:?}", url));
             }
         };
 
@@ -345,7 +342,9 @@ fn parse_int32(s: &str) -> Option<u32> {
 /// Parse one octet that may be decimal, hex, or octal. Returns `None` if value exceeds 255.
 fn parse_octet(s: &str) -> Option<u8> {
     let n = parse_int32(s)?;
-    if n > 255 { return None; }
+    if n > 255 {
+        return None;
+    }
     Some(n as u8)
 }
 
@@ -357,8 +356,8 @@ fn parse_ipv4(s: &str) -> Option<[u8; 4]> {
         return Some([
             ((n >> 24) & 0xFF) as u8,
             ((n >> 16) & 0xFF) as u8,
-            ((n >> 8)  & 0xFF) as u8,
-            ( n        & 0xFF) as u8,
+            ((n >> 8) & 0xFF) as u8,
+            (n & 0xFF) as u8,
         ]);
     }
 
@@ -378,8 +377,8 @@ fn parse_ipv4(s: &str) -> Option<[u8; 4]> {
 fn is_private_ipv4(ip: [u8; 4]) -> bool {
     let [a, b, _, _] = ip;
     match a {
-        127 => true,                            // 127.0.0.0/8  loopback
-        10 => true,                             // 10.0.0.0/8   private (RFC 1918)
+        127 => true,                           // 127.0.0.0/8  loopback
+        10 => true,                            // 10.0.0.0/8   private (RFC 1918)
         172 if (16..=31).contains(&b) => true, // 172.16.0.0/12 private (RFC 1918)
         192 if b == 168 => true,               // 192.168.0.0/16 private (RFC 1918)
         169 if b == 254 => true,               // 169.254.0.0/16 link-local (RFC 3927)
@@ -436,14 +435,18 @@ fn parse_ipv6(s: &str) -> Option<[u8; 16]> {
     let total = left_groups.len() + right_groups.len() + v4_count;
 
     let mut groups: Vec<u16> = if has_double_colon {
-        if total > 8 { return None; }
+        if total > 8 {
+            return None;
+        }
         let mut g = left_groups;
         let target_len = 8 - right_groups.len() - v4_count;
         g.resize(target_len, 0u16);
         g.extend(right_groups);
         g
     } else {
-        if total != 8 { return None; }
+        if total != 8 {
+            return None;
+        }
         let mut g = left_groups;
         g.extend(right_groups);
         g
@@ -789,7 +792,10 @@ mod tests {
     #[test]
     fn no_scheme_url_blocked() {
         let p = ResourcePolicy::default();
-        assert!(matches!(p.decide("//no-scheme/path", false), Decision::Block(_)));
+        assert!(matches!(
+            p.decide("//no-scheme/path", false),
+            Decision::Block(_)
+        ));
     }
 
     #[test]
@@ -1052,7 +1058,10 @@ mod tests {
 
     #[test]
     fn extract_file_path_with_authority() {
-        assert_eq!(extract_file_path("//localhost/var/www/x.html"), "/var/www/x.html");
+        assert_eq!(
+            extract_file_path("//localhost/var/www/x.html"),
+            "/var/www/x.html"
+        );
     }
 
     #[test]
@@ -1102,7 +1111,10 @@ mod tests {
 
     #[test]
     fn extract_http_host_strips_userinfo_with_port() {
-        assert_eq!(extract_http_host("//user:pass@example.com:8080/path"), "example.com");
+        assert_eq!(
+            extract_http_host("//user:pass@example.com:8080/path"),
+            "example.com"
+        );
     }
 
     #[test]
@@ -1114,7 +1126,10 @@ mod tests {
     fn safe_blocks_userinfo_loopback() {
         let p = ResourcePolicy::safe_profile();
         assert!(
-            matches!(p.decide("http://user@127.0.0.1/", false), Decision::Block(_)),
+            matches!(
+                p.decide("http://user@127.0.0.1/", false),
+                Decision::Block(_)
+            ),
             "userinfo@loopback must be blocked under safe"
         );
     }
@@ -1123,7 +1138,10 @@ mod tests {
     fn safe_blocks_userinfo_link_local() {
         let p = ResourcePolicy::safe_profile();
         assert!(
-            matches!(p.decide("http://user:pass@169.254.169.254/", false), Decision::Block(_)),
+            matches!(
+                p.decide("http://user:pass@169.254.169.254/", false),
+                Decision::Block(_)
+            ),
             "userinfo@link-local must be blocked under safe"
         );
     }
@@ -1232,7 +1250,10 @@ mod tests {
     fn safe_blocks_ipv4_mapped_loopback() {
         let p = ResourcePolicy::safe_profile();
         assert!(
-            matches!(p.decide("http://[::ffff:127.0.0.1]/", false), Decision::Block(_)),
+            matches!(
+                p.decide("http://[::ffff:127.0.0.1]/", false),
+                Decision::Block(_)
+            ),
             "IPv4-mapped loopback must be blocked under safe"
         );
     }
@@ -1241,7 +1262,10 @@ mod tests {
     fn safe_blocks_ipv4_mapped_imds() {
         let p = ResourcePolicy::safe_profile();
         assert!(
-            matches!(p.decide("http://[::ffff:169.254.169.254]/", false), Decision::Block(_)),
+            matches!(
+                p.decide("http://[::ffff:169.254.169.254]/", false),
+                Decision::Block(_)
+            ),
             "IPv4-mapped IMDS must be blocked under safe"
         );
     }

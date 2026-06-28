@@ -43,9 +43,7 @@ fn write_temp_html(content: &str) -> tempfile::NamedTempFile {
 #[test]
 #[ignore]
 fn convert_html_to_pdf_starts_with_pdf_magic() {
-    let html = write_temp_html(
-        "<!DOCTYPE html><html><body><h1>Hello PDF</h1></body></html>",
-    );
+    let html = write_temp_html("<!DOCTYPE html><html><body><h1>Hello PDF</h1></body></html>");
     let out_pdf = tempfile::Builder::new()
         .prefix("wkx-out-")
         .suffix(".pdf")

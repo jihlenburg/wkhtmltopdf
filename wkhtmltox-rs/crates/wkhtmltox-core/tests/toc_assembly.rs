@@ -89,10 +89,7 @@ fn pdf_string_to_str(bytes: &[u8]) -> String {
 ///   set_outline page 3 (0-based) = lopdf page 4 (1-based). ✓
 #[test]
 fn toc_with_mock_converges_and_offsets_bookmarks() {
-    let out = std::env::temp_dir().join(format!(
-        "wkx_toc_test_{}.pdf",
-        std::process::id()
-    ));
+    let out = std::env::temp_dir().join(format!("wkx_toc_test_{}.pdf", std::process::id()));
 
     // MockRenderer: always returns the same 2-page PDF with "H" bookmark at
     // local 0-based page 1.  Probe has no headings so extract_outline is used.
@@ -105,7 +102,10 @@ fn toc_with_mock_converges_and_offsets_bookmarks() {
         &[Source::Html("<h2>H</h2><p>content</p>".into())],
         &PageGeometry::default(),
         &out,
-        &AssembleOpts { with_toc: true, ..Default::default() },
+        &AssembleOpts {
+            with_toc: true,
+            ..Default::default()
+        },
     )
     .expect("assemble_pdf with TOC should succeed");
 

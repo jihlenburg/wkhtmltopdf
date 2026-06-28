@@ -15,7 +15,10 @@ pub fn find_chrome() -> Option<PathBuf> {
         return None;
     }
     // 2. A chrome-headless-shell bundled next to our executable (self-contained artifact).
-    if let Some(exe) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
+    if let Some(exe) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.to_path_buf()))
+    {
         if let Some(bundled) = bundled_chrome_in(&exe) {
             return Some(bundled);
         }
@@ -37,7 +40,11 @@ pub fn find_chrome() -> Option<PathBuf> {
 /// subdirectory layout (Chrome for Testing unzips into a versioned subdir, which
 /// the packaging script flattens to one of these two shapes).
 fn bundled_chrome_in(dir: &std::path::Path) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "chrome-headless-shell.exe" } else { "chrome-headless-shell" };
+    let name = if cfg!(windows) {
+        "chrome-headless-shell.exe"
+    } else {
+        "chrome-headless-shell"
+    };
     let candidates = [dir.join(name), dir.join("chrome-headless-shell").join(name)];
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -65,7 +72,11 @@ mod tests {
     #[test]
     fn finds_sibling_chrome_headless_shell() {
         let dir = tempfile::tempdir().unwrap();
-        let name = if cfg!(windows) { "chrome-headless-shell.exe" } else { "chrome-headless-shell" };
+        let name = if cfg!(windows) {
+            "chrome-headless-shell.exe"
+        } else {
+            "chrome-headless-shell"
+        };
         let p = dir.path().join(name);
         std::fs::write(&p, b"#!/bin/sh\n").unwrap();
         let found = bundled_chrome_in(dir.path()).expect("sibling should be found");
@@ -75,7 +86,11 @@ mod tests {
     #[test]
     fn finds_chrome_in_subdir_layout() {
         let dir = tempfile::tempdir().unwrap();
-        let name = if cfg!(windows) { "chrome-headless-shell.exe" } else { "chrome-headless-shell" };
+        let name = if cfg!(windows) {
+            "chrome-headless-shell.exe"
+        } else {
+            "chrome-headless-shell"
+        };
         let sub = dir.path().join("chrome-headless-shell");
         std::fs::create_dir_all(&sub).unwrap();
         let p = sub.join(name);
@@ -102,7 +117,8 @@ mod tests {
     fn args_include_proxy_when_set() {
         let a = launch_args(9333, "/tmp/x", Some("http://proxy.example:8080"));
         assert!(
-            a.iter().any(|s| s == "--proxy-server=http://proxy.example:8080"),
+            a.iter()
+                .any(|s| s == "--proxy-server=http://proxy.example:8080"),
             "expected --proxy-server in args: {a:?}"
         );
         assert_eq!(a.last().unwrap(), "about:blank");

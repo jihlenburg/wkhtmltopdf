@@ -14,10 +14,17 @@ fn missing_local_input_is_nonzero() {
     // so the test pins the guard path specifically and cannot pass for the
     // wrong reason (e.g. a Chrome-spawn failure in a browserless environment).
     let out = bin()
-        .args(["/no/such/input/file_xyz.html", "/tmp/out_should_not_exist.png"])
+        .args([
+            "/no/such/input/file_xyz.html",
+            "/tmp/out_should_not_exist.png",
+        ])
         .output()
         .expect("spawn");
-    assert!(!out.status.success(), "missing input must be nonzero, got {:?}", out.status);
+    assert!(
+        !out.status.success(),
+        "missing input must be nonzero, got {:?}",
+        out.status
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("input file not found"),

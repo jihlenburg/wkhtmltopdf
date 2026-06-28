@@ -72,7 +72,12 @@ struct CoverMockRenderer {
 
 impl CoverMockRenderer {
     fn new(cover_pdf: Vec<u8>, content_pdf: Vec<u8>) -> Self {
-        Self { cover_pdf, content_pdf, call_count: 0, next: 0 }
+        Self {
+            cover_pdf,
+            content_pdf,
+            call_count: 0,
+            next: 0,
+        }
     }
 }
 
@@ -117,7 +122,10 @@ impl wkhtmltox_core::render::Renderer for CoverMockRenderer {
         _p: wkhtmltox_core::render::PageHandle,
         o: &wkhtmltox_core::render::SnapshotOpts,
     ) -> wkhtmltox_core::error::Result<wkhtmltox_core::render::RawImage> {
-        Ok(wkhtmltox_core::render::RawImage { bytes: vec![0u8; 8], format: o.format })
+        Ok(wkhtmltox_core::render::RawImage {
+            bytes: vec![0u8; 8],
+            format: o.format,
+        })
     }
     fn page_info(
         &self,
@@ -142,10 +150,7 @@ impl wkhtmltox_core::render::Renderer for CoverMockRenderer {
 /// - last content page (page 3) shows "(2/2)" in footer center
 #[test]
 fn cover_excluded_from_footer_and_numbering() {
-    let out = std::env::temp_dir().join(format!(
-        "wkx_cover_footer_{}.pdf",
-        std::process::id()
-    ));
+    let out = std::env::temp_dir().join(format!("wkx_cover_footer_{}.pdf", std::process::id()));
 
     // cover = 1 page, content = 2 pages
     let mut mock = CoverMockRenderer::new(min_pdf_bytes(1), min_pdf_bytes(2));
@@ -226,10 +231,7 @@ fn cover_excluded_from_footer_and_numbering() {
 /// - The cover page has no footer; content pages are numbered 1..3 with topage=4.
 #[test]
 fn cover_with_toc_offsets_bookmarks_correctly() {
-    let out = std::env::temp_dir().join(format!(
-        "wkx_cover_toc_{}.pdf",
-        std::process::id()
-    ));
+    let out = std::env::temp_dir().join(format!("wkx_cover_toc_{}.pdf", std::process::id()));
 
     // Build a 2-page content PDF with an /Outlines "H" at local 0-based page 1.
     let content_pdf = build_min_pdf_with_h_outline();
@@ -297,7 +299,9 @@ fn cover_with_toc_offsets_bookmarks_correctly() {
         .expect("TOC bookmark must have /Dest")
         .as_array()
         .expect("/Dest must be array");
-    let toc_page_ref = toc_dest[0].as_reference().expect("/Dest[0] must be page ref");
+    let toc_page_ref = toc_dest[0]
+        .as_reference()
+        .expect("/Dest[0] must be page ref");
     let page2_id = *pages_map.get(&2).expect("lopdf page 2 must exist");
     assert_eq!(
         toc_page_ref, page2_id,

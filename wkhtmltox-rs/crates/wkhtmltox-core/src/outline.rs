@@ -62,10 +62,7 @@ pub fn parse_probe(v: &serde_json::Value) -> Vec<Heading> {
                             .get("anchor")
                             .and_then(|a| a.as_str())
                             .map(|s| s.to_string()),
-                        page: h
-                            .get("page")
-                            .and_then(|p| p.as_u64())
-                            .unwrap_or(0) as u32,
+                        page: h.get("page").and_then(|p| p.as_u64()).unwrap_or(0) as u32,
                     })
                 })
                 .collect()
@@ -112,7 +109,12 @@ pub fn parse_probe_links(v: &serde_json::Value) -> Vec<ProbeLink> {
                         rect_arr[2].as_f64()?,
                         rect_arr[3].as_f64()?,
                     ];
-                    Some(ProbeLink { href, internal, top, rect })
+                    Some(ProbeLink {
+                        href,
+                        internal,
+                        top,
+                        rect,
+                    })
                 })
                 .collect()
         })
@@ -171,7 +173,10 @@ mod tests {
     #[test]
     fn probe_js_is_present() {
         assert!(PROBE_JS.contains("headings"));
-        assert!(PROBE_JS.contains("links"), "PROBE_JS must also collect links");
+        assert!(
+            PROBE_JS.contains("links"),
+            "PROBE_JS must also collect links"
+        );
     }
 
     #[test]

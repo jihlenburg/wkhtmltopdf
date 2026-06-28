@@ -15,8 +15,16 @@ fn adds_two_text_fields_to_acroform() {
     let out = add_text_fields(
         &pdf,
         &[
-            TextFieldSpec { name: "a".into(), page_index: 0, rect: [72.0, 700.0, 272.0, 724.0] },
-            TextFieldSpec { name: "b".into(), page_index: 0, rect: [72.0, 660.0, 272.0, 684.0] },
+            TextFieldSpec {
+                name: "a".into(),
+                page_index: 0,
+                rect: [72.0, 700.0, 272.0, 724.0],
+            },
+            TextFieldSpec {
+                name: "b".into(),
+                page_index: 0,
+                rect: [72.0, 660.0, 272.0, 684.0],
+            },
         ],
     )
     .expect("add_text_fields must succeed");

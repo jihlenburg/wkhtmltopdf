@@ -10,8 +10,7 @@ fn page_numbers_footer() {
     // Build a 3-page PDF.
     common::write_min_pdf(inp.to_str().unwrap(), 3);
 
-    wkhtmltox_pdf_sys::stamp_footer(&inp, &outp, "[page] / [topage]", 1)
-        .expect("stamp_footer");
+    wkhtmltox_pdf_sys::stamp_footer(&inp, &outp, "[page] / [topage]", 1).expect("stamp_footer");
 
     let doc = lopdf::Document::load(&outp).expect("load stamped PDF");
     let pages = doc.get_pages();

@@ -49,7 +49,9 @@ fn add_link_annot_page0_to_page2() {
         assert_eq!(annots_arr.len(), 1, "/Annots must have exactly one entry");
 
         // The annotation may be a direct dict or an indirect reference.
-        let annot_ref = annots_arr[0].as_reference().expect("/Annots[0] must be a ref");
+        let annot_ref = annots_arr[0]
+            .as_reference()
+            .expect("/Annots[0] must be a ref");
 
         // Resolve annotation dict; extract /Subtype and /Dest[0] as owned.
         let annot_obj = doc.get_object(annot_ref).expect("resolve annot");
@@ -68,7 +70,9 @@ fn add_link_annot_page0_to_page2() {
             .as_array()
             .expect("/Dest must be an array");
         assert!(!dest_arr.is_empty(), "/Dest must be non-empty");
-        let dest_page = dest_arr[0].as_reference().expect("/Dest[0] must be a page ref");
+        let dest_page = dest_arr[0]
+            .as_reference()
+            .expect("/Dest[0] must be a page ref");
 
         (annot_ref, subtype, dest_page)
     };

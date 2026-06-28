@@ -37,10 +37,7 @@ fn run(args: &[String]) -> i32 {
     // ── Info modes ────────────────────────────────────────────────────────────
     match inv.mode {
         RunMode::Version => {
-            println!(
-                "wkhtmltopdf {} (wkhtmltox-rs)",
-                env!("CARGO_PKG_VERSION")
-            );
+            println!("wkhtmltopdf {} (wkhtmltox-rs)", env!("CARGO_PKG_VERSION"));
             return 0;
         }
         RunMode::Help => {
@@ -176,10 +173,7 @@ fn run(args: &[String]) -> i32 {
     }
 
     // ── Assemble PDF ──────────────────────────────────────────────────────────
-    eprintln!(
-        "wkhtmltopdf: converting {} page(s)…",
-        sources.len()
-    );
+    eprintln!("wkhtmltopdf: converting {} page(s)…", sources.len());
     match assemble_pdf(&mut renderer, &sources, &geom, &out_path, &opts) {
         Ok(report) => {
             eprintln!(
@@ -242,10 +236,12 @@ fn resolve_input(inp: &Input, stdin_temp: Option<&NamedTempFile>) -> Result<Sour
             // Return Err instead of panicking when the caller forgot to call
             // read_stdin_to_temp (Fix 5).
             let tf = stdin_temp.ok_or_else(|| {
-                "internal error: stdin_temp not populated before resolving Stdin inputs"
-                    .to_string()
+                "internal error: stdin_temp not populated before resolving Stdin inputs".to_string()
             })?;
-            Ok(Source::Url(format!("file://{}", percent_encode_path(tf.path()))))
+            Ok(Source::Url(format!(
+                "file://{}",
+                percent_encode_path(tf.path())
+            )))
         }
     }
 }
@@ -261,9 +257,16 @@ fn percent_encode_path(path: &std::path::Path) -> String {
     for &byte in s.as_bytes() {
         match byte {
             // Unreserved (RFC 3986 §2.3) + path-safe chars kept as-is.
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~'
-            | b'/' | b':' | b'@' => out.push(byte as char),
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'/'
+            | b':'
+            | b'@' => out.push(byte as char),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }

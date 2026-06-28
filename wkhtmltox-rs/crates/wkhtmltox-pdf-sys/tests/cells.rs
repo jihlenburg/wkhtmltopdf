@@ -19,11 +19,19 @@ fn stamp_cells_bottom_center_two_pages() {
     // Page 2: bot-center = "2"; all others empty.
     let cells: Vec<String> = vec![
         // Page 1
-        "".into(), "".into(), "".into(), // top row
-        "".into(), "1".into(), "".into(), // bottom row
+        "".into(),
+        "".into(),
+        "".into(), // top row
+        "".into(),
+        "1".into(),
+        "".into(), // bottom row
         // Page 2
-        "".into(), "".into(), "".into(), // top row
-        "".into(), "2".into(), "".into(), // bottom row
+        "".into(),
+        "".into(),
+        "".into(), // top row
+        "".into(),
+        "2".into(),
+        "".into(), // bottom row
     ];
 
     wkhtmltox_pdf_sys::stamp_cells(&inp, &outp, &cells, 2, 9.0)
@@ -91,7 +99,10 @@ fn stamp_cells_zero_pages_returns_err() {
     // 0 pages, 0 cells — the C shim should return 2.
     let cells: Vec<String> = vec![];
     let result = wkhtmltox_pdf_sys::stamp_cells(&inp, &outp, &cells, 0, 9.0);
-    assert!(result.is_err(), "stamp_cells with n_pages=0 should return Err");
+    assert!(
+        result.is_err(),
+        "stamp_cells with n_pages=0 should return Err"
+    );
 }
 
 /// Verify that all-empty cells still produces a valid PDF without extra content.

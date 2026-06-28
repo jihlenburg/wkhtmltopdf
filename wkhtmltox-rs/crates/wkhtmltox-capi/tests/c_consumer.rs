@@ -25,11 +25,7 @@ fn c_consumer_builds_and_passes() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let run_sh = manifest_dir.join("ctest").join("run.sh");
 
-    assert!(
-        run_sh.exists(),
-        "run.sh not found at {}",
-        run_sh.display()
-    );
+    assert!(run_sh.exists(), "run.sh not found at {}", run_sh.display());
 
     let status = Command::new("bash")
         .arg(&run_sh)
