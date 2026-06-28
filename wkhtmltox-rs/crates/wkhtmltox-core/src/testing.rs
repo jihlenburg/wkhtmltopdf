@@ -32,7 +32,10 @@ impl Renderer for MockRenderer {
     fn eval_json(&mut self, _p: PageHandle, _s: &str) -> Result<serde_json::Value> { Ok(self.probe.clone()) }
     fn print_pdf(&mut self, _p: PageHandle, _g: &PageGeometry) -> Result<Vec<u8>> { Ok(self.pdf.clone()) }
     fn snapshot(&mut self, _p: PageHandle, o: &SnapshotOpts) -> Result<RawImage> {
-        Ok(RawImage { bytes: vec![0u8; 8], format: o.format })
+        // Return a real 2×2 PNG so that callers (e.g. image::produce) can
+        // decode it without errors.  The format field is set from opts so that
+        // the downstream pipeline sees the requested format.
+        Ok(RawImage { bytes: crate::image::tiny_png(), format: o.format })
     }
     fn page_info(&self, _p: PageHandle) -> Result<PageInfo> { Ok(self.info.clone()) }
 }

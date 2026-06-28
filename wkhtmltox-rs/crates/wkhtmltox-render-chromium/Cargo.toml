@@ -12,4 +12,5 @@ ureq.workspace = true
 base64 = "0.22"
 
 [dev-dependencies]
+image.workspace = true
 lopdf.workspace = true

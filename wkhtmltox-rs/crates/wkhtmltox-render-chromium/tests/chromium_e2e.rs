@@ -216,6 +216,86 @@ setTimeout(function() {{
     );
 }
 
+// ── Snapshot tests (M5 Task 1) ───────────────────────────────────────────────
+
+/// Basic smoke test: snapshot a simple data: page, get back a valid PNG whose
+/// dimensions are both > 0.
+#[test]
+#[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
+fn snapshot_data_url_returns_valid_png() {
+    let mut r = ChromiumRenderer::spawn().expect("spawn chrome");
+    let load = LoadSettings { enable_javascript: false, ..Default::default() };
+    let p = r.open(
+        &Source::Url(
+            "data:text/html,<html><body style='background:red'><h1>Snapshot</h1></body></html>"
+                .into(),
+        ),
+        &load,
+    )
+    .expect("open");
+    r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready");
+
+    let raw = r.snapshot(p, &SnapshotOpts::default()).expect("snapshot must succeed");
+
+    // PNG magic header.
+    assert_eq!(&raw.bytes[..4], b"\x89PNG", "snapshot must return a PNG");
+
+    // Decode with the image crate and verify dims > 0.
+    let decoded = ::image::load_from_memory(&raw.bytes).expect("PNG must decode");
+    assert!(decoded.width() > 0,  "snapshot width must be > 0");
+    assert!(decoded.height() > 0, "snapshot height must be > 0");
+}
+
+/// Policy test: a page that references a private-IP subresource under the safe
+/// profile still snapshots successfully.  The blocked subresource is recorded
+/// in `blocked_urls`; the overall capture succeeds.
+#[test]
+#[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
+fn snapshot_under_safe_policy_blocks_private_ip_subresource() {
+    use wkhtmltox_core::policy::ResourcePolicy;
+
+    let policy = ResourcePolicy {
+        allow_local_file: false,
+        allowed_paths: vec![],
+        block_private_ips: true,
+        allow_external_links: true,
+        allow_internal_links: true,
+    };
+    let load = LoadSettings {
+        enable_javascript: false,
+        policy,
+        ..Default::default()
+    };
+
+    // The img src points to a private IP that the safe policy must block.
+    let html = concat!(
+        "data:text/html,<html><body>",
+        "<img src='http://192.168.1.1/blocked.png' alt='blocked'>",
+        "<h1>Safe snapshot</h1>",
+        "</body></html>",
+    );
+
+    let mut r = ChromiumRenderer::spawn().expect("spawn chrome");
+    let p = r.open(&Source::Url(html.into()), &load).expect("open");
+    r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready");
+
+    // Snapshot must succeed even though a subresource was blocked.
+    let raw = r
+        .snapshot(p, &SnapshotOpts::default())
+        .expect("snapshot must succeed despite blocked subresource");
+
+    assert_eq!(&raw.bytes[..4], b"\x89PNG", "snapshot must return PNG");
+    let decoded = ::image::load_from_memory(&raw.bytes).expect("PNG must decode");
+    assert!(decoded.width() > 0 && decoded.height() > 0, "dims must be > 0");
+
+    // The private-IP image must have been blocked by the policy.
+    let blocked = r.blocked_urls();
+    assert!(
+        blocked.iter().any(|u| u.contains("192.168.1.1")),
+        "safe policy must have blocked the private-IP img; blocked_urls={blocked:?}",
+    );
+}
+
 /// Verify that ResourcePolicy is enforced via CDP Fetch interception.
 ///
 /// The test creates a temp HTML file that references two subresources:

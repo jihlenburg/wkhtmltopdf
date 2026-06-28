@@ -771,8 +771,52 @@ impl Renderer for ChromiumRenderer {
         Ok(pdf)
     }
 
-    fn snapshot(&mut self, _p: PageHandle, _o: &SnapshotOpts) -> Result<RawImage> {
-        Err(WkError::Engine("snapshot lands in a later milestone".into()))
+    fn snapshot(&mut self, _p: PageHandle, o: &SnapshotOpts) -> Result<RawImage> {
+        let fmt_str = match o.format {
+            ImageFormat::Png  => "png",
+            ImageFormat::Jpeg => "jpeg",
+        };
+
+        let mut params = json!({
+            "format": fmt_str,
+            "captureBeyondViewport": true,
+            "fromSurface": true,
+        });
+
+        // JPEG quality (ignored by Chrome for PNG).
+        if o.format == ImageFormat::Jpeg {
+            params["quality"] = json!(o.quality);
+        }
+
+        // CDP clip: applied when the caller requested a crop region.
+        // `scale` here maps logical CSS pixels to the physical device pixels
+        // captured by captureScreenshot.
+        if let Some((x, y, w, h)) = o.crop {
+            params["clip"] = json!({
+                "x": x,
+                "y": y,
+                "width": w,
+                "height": h,
+                "scale": o.scale,
+            });
+        }
+
+        // Use call_pumping so that any Fetch.requestPaused events Chrome may
+        // emit during the capture (e.g. from running scripts) are serviced
+        // inline and policy enforcement remains active.
+        let r = self.call_pumping("Page.captureScreenshot", params)?;
+
+        let b64 = r["data"].as_str()
+            .ok_or_else(|| WkError::Render("captureScreenshot: no data field".into()))?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|e| WkError::Render(format!("captureScreenshot b64 decode: {e}")))?;
+
+        // Page is done — disable Fetch interception (mirrors print_pdf).
+        let _ = self.cdp.send_only("Fetch.disable", json!({}));
+        self.fetch_state = None;
+
+        Ok(RawImage { bytes, format: o.format })
     }
     fn page_info(&self, _p: PageHandle) -> Result<PageInfo> {
         Err(WkError::Engine("page_info lands in a later milestone".into()))
