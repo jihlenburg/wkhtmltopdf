@@ -1,0 +1,15 @@
+[package]
+name = "wkhtmltox-capi"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+wkhtmltox-core = { path = "../wkhtmltox-core" }
+wkhtmltox-render-chromium = { path = "../wkhtmltox-render-chromium" }
+wkhtmltox-pdf-sys = { path = "../wkhtmltox-pdf-sys" }
+
+[dev-dependencies]
+lopdf.workspace = true
