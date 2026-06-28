@@ -798,8 +798,13 @@ fn build_cell_strings(
 /// Convert a bare filesystem path to a `file://` URL, or pass through if the
 /// value already carries a URL scheme (`http://`, `https://`, `file://`, `data:`).
 ///
-/// Only space → `%20` is percent-encoded; other characters are left as-is
-/// (sufficient for typical local paths on macOS/Linux).
+/// Fix M2: encodes `%` first (to avoid double-encoding), then space, `#`, `?`,
+/// and any non-ASCII / control byte as `%XX`.  `/` is preserved (path
+/// separators).  Other printable ASCII characters (0x21-0x7E) are kept as-is.
+///
+/// Without this, a bare path containing `#` or `?` would confuse
+/// `header_footer_query` (the `?` would be mistaken for a pre-existing query
+/// separator) and produce a malformed `file://` URL.
 fn ensure_url(path_or_url: &str) -> String {
     if path_or_url.starts_with("http://")
         || path_or_url.starts_with("https://")
@@ -809,7 +814,29 @@ fn ensure_url(path_or_url: &str) -> String {
         path_or_url.to_string()
     } else {
         // Bare filesystem path → file:// URL.
-        format!("file://{}", path_or_url.replace(' ', "%20"))
+        // Encode in order: % first (avoid double-encoding), then space, #, ?,
+        // then any remaining non-printable-ASCII byte.
+        // '/' is kept verbatim as a path separator.
+        let mut encoded = String::with_capacity(path_or_url.len() + 16);
+        for &byte in path_or_url.as_bytes() {
+            match byte {
+                b'%' => encoded.push_str("%25"),
+                b' ' => encoded.push_str("%20"),
+                b'#' => encoded.push_str("%23"),
+                b'?' => encoded.push_str("%3F"),
+                b => {
+                    // Printable ASCII 0x21-0x7E (excl. the four above): keep verbatim.
+                    // This range includes '/' (0x2F) which we intentionally preserve.
+                    if (0x21..=0x7E).contains(&b) {
+                        encoded.push(b as char);
+                    } else {
+                        // Control bytes, 0x00 (NUL), 0x7F (DEL), and non-ASCII.
+                        encoded.push_str(&format!("%{b:02X}"));
+                    }
+                }
+            }
+        }
+        format!("file://{encoded}")
     }
 }
 
@@ -886,6 +913,27 @@ fn render_html_overlays(
         None
     };
 
+    // Fix M1: when opts.date/isodate/time are empty (the CLI and C-ABI never
+    // populate them — they leave them blank), fall back to the live clock, the
+    // same helper the text-cell path uses.  The fallback is computed once outside
+    // the loop so all pages share the same timestamp.
+    let (fallback_date, fallback_time) = crate::headerfooter::now_date_time();
+    let date_str = if opts.date.is_empty() {
+        fallback_date.clone()
+    } else {
+        opts.date.clone()
+    };
+    let isodate_str = if opts.isodate.is_empty() {
+        fallback_date.clone()
+    } else {
+        opts.isodate.clone()
+    };
+    let time_str = if opts.time.is_empty() {
+        fallback_time.clone()
+    } else {
+        opts.time.clone()
+    };
+
     // Temp directory holds per-page overlay PDFs; must outlive the overlay_pages call.
     let overlay_dir = tempfile::TempDir::new().map_err(|e| WkError::Io(e.to_string()))?;
     let mut specs: Vec<wkhtmltox_pdf_sys::OverlaySpec> = Vec::new();
@@ -903,9 +951,9 @@ fn render_html_overlays(
             section,
             subsection,
             subsubsection: String::new(),
-            date: opts.date.clone(),
-            isodate: opts.isodate.clone(),
-            time: opts.time.clone(),
+            date: date_str.clone(),
+            isodate: isodate_str.clone(),
+            time: time_str.clone(),
             title: opts.doc_title.clone(),
             doctitle: opts.doc_title.clone(),
             sitepage: page_1based,

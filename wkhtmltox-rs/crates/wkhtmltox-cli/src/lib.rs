@@ -1565,6 +1565,35 @@ mod tests {
         );
     }
 
+    /// End-to-end: `--replace foo bar` must reach `AssembleOpts.replacements`.
+    ///
+    /// This is the I1 regression guard: `--replace` is a TwoArg flag that always
+    /// lands in the per-object pending list.  `to_assemble_opts()` only clones
+    /// `global.replacements` (never populated from the CLI for this flag), so the
+    /// caller must explicitly merge per-object replacements after building opts.
+    /// This test verifies that the merge produces the expected pair.
+    #[test]
+    fn replace_end_to_end_reaches_assemble_opts() {
+        let inv = parse(&args(&["--replace", "foo", "bar", "in.html", "out.pdf"]))
+            .expect("--replace should parse without error");
+        assert_eq!(inv.objects.len(), 1, "expected exactly one object");
+        // The pair must be on the per-object settings (existing behaviour).
+        assert_eq!(
+            inv.objects[0].0.replacements,
+            vec![("foo".to_owned(), "bar".to_owned())],
+            "--replace foo bar must be stored on the object"
+        );
+        // Simulate the fix: build opts then merge per-object replacements.
+        let mut opts = inv.global.to_assemble_opts();
+        opts.replacements
+            .extend(inv.objects.iter().flat_map(|(o, _)| o.replacements.iter().cloned()));
+        assert!(
+            opts.replacements.contains(&("foo".to_owned(), "bar".to_owned())),
+            "AssembleOpts.replacements must contain (\"foo\", \"bar\") after merge; got: {:?}",
+            opts.replacements
+        );
+    }
+
     /// `--header-spacing <real>` stores the spacing on global (leading phase).
     #[test]
     fn header_spacing_flag_is_accepted() {

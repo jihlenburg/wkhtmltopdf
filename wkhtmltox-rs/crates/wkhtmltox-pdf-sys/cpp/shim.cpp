@@ -2,6 +2,7 @@
 #include "shim.h"
 #include <string>
 #include <sstream>
+#include <iomanip>
 #include <vector>
 #include <memory>
 #include <qpdf/QPDF.hh>
@@ -539,6 +540,10 @@ extern "C" int wkx_pdf_overlay_pages(const char* base_path, const char* out_path
             // Unique name per overlay: /WkxOv{i} — safe even if the same page
             // is overlaid twice (header + footer) because i is the global loop index.
             std::string xname = "/WkxOv" + std::to_string(i);
+            // Fix M3: defensive guard — if a pre-existing XObject already carries
+            // this name (e.g. a document that literally contains /WkxOv0), append
+            // underscores until the name is unique, so we never clobber it.
+            while (xobjects.hasKey(xname)) xname += "_";
             xobjects.replaceKey(xname, fxCopied);
 
             // Build the placement content stream:
@@ -546,8 +551,11 @@ extern "C" int wkx_pdf_overlay_pages(const char* base_path, const char* out_path
             //   1 0 0 1 tx ty  — translation matrix (cm operator)
             //   /WkxOv{i} Do  — invoke the Form XObject
             //   Q              — restore graphics state
+            // Fix M4: use std::fixed / std::setprecision to prevent scientific
+            // notation (e.g. 1e-07) in tx/ty, which is invalid in PDF streams.
             std::ostringstream ss;
-            ss << "q 1 0 0 1 " << tx[i] << " " << ty[i]
+            ss << std::fixed << std::setprecision(4)
+               << "q 1 0 0 1 " << tx[i] << " " << ty[i]
                << " cm " << xname << " Do Q\n";
 
             QPDFObjectHandle stream = QPDFObjectHandle::newStream(&base, ss.str());

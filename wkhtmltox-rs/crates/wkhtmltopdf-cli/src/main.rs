@@ -128,6 +128,16 @@ fn run(args: &[String]) -> i32 {
     let geom = inv.global.to_geometry();
     let mut opts = inv.global.to_assemble_opts();
 
+    // Fix I1: `--replace name value` is a TwoArg flag that always lands in the
+    // per-object pending list, so it ends up in objects[i].0.replacements.
+    // `to_assemble_opts()` only clones global.replacements (which is never
+    // populated from the CLI for this flag).  Merge all per-object replacements
+    // into opts here so they are forwarded to the HTML header/footer query.
+    // Treat them globally — correct for the common single-object case; per-object
+    // scoping is a post-v1 refinement.
+    opts.replacements
+        .extend(inv.objects.iter().flat_map(|(o, _)| o.replacements.iter().cloned()));
+
     // CLI `--toc` / `toc` keyword overrides the global setting.
     opts.with_toc = inv.toc;
 
