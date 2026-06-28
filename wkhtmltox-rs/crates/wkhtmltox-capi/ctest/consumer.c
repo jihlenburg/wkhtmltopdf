@@ -94,11 +94,21 @@ int main(void)
     }
 
     /* --- converter ------------------------------------------------------- */
+    /*
+     * create_converter TRANSFERS ownership of gs to the converter.
+     * Do NOT call wkhtmltopdf_destroy_global_settings(gs) after this — the
+     * converter (or destroy_converter) owns and frees it.  This matches the
+     * upstream wkhtmltopdf C ABI (pdf.h) semantics.
+     */
     wkhtmltopdf_converter *c = wkhtmltopdf_create_converter(gs);
     if (!c) {
         fprintf(stderr, "FAIL: create_converter returned NULL\n");
+        /*
+         * gs ownership was transferred to (the failed) create_converter call;
+         * do NOT destroy gs here — it is already freed.
+         * os was not yet passed to add_object, so it is still our responsibility.
+         */
         wkhtmltopdf_destroy_object_settings(os);
-        wkhtmltopdf_destroy_global_settings(gs);
         wkhtmltopdf_deinit();
         return 1;
     }
@@ -108,6 +118,10 @@ int main(void)
     wkhtmltopdf_set_error_callback(c, on_error);
 
     /* --- add inline HTML object ------------------------------------------ */
+    /*
+     * add_object TRANSFERS ownership of os to the converter.
+     * Do NOT call wkhtmltopdf_destroy_object_settings(os) after this.
+     */
     wkhtmltopdf_add_object(c, os, "<h1>Hello C ABI</h1><p>body</p>");
 
     /* --- convert --------------------------------------------------------- */
@@ -166,9 +180,13 @@ int main(void)
     }
 
     /* --- cleanup --------------------------------------------------------- */
+    /*
+     * destroy_converter frees the converter AND its owned GlobalSettings (gs)
+     * and all owned PdfObjectSettings (os).  Do NOT separately call
+     * destroy_object_settings(os) or destroy_global_settings(gs) — that would
+     * be a double-free, exactly as with the real wkhtmltopdf library.
+     */
     wkhtmltopdf_destroy_converter(c);
-    wkhtmltopdf_destroy_object_settings(os);
-    wkhtmltopdf_destroy_global_settings(gs);
     wkhtmltopdf_deinit();
 
     /* --- report ---------------------------------------------------------- */

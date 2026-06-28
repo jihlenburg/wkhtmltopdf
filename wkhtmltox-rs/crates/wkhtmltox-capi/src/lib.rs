@@ -60,6 +60,16 @@ const PHASES: &[&str] = &[
 
 // ---------------------------------------------------------------------------
 // CConverter — internal state behind `wkhtmltopdf_converter *`
+//
+// # Safety and threading
+//
+// A single `CConverter` handle (and the raw pointer returned by
+// `wkhtmltopdf_create_converter`) must be used from **one thread at a time**.
+// Its internal fields (`str_cache`, `output`, `objects`) are mutated through
+// the handle and are not synchronised.  Distinct converters are independent
+// and may be used concurrently from different threads.
+//
+// This matches upstream wkhtmltopdf's single-threaded-converter contract.
 // ---------------------------------------------------------------------------
 
 pub struct CConverter {
@@ -392,10 +402,18 @@ pub unsafe extern "C" fn wkhtmltopdf_get_object_setting(
 
 /// `wkhtmltopdf_create_converter(settings)` → converter handle.
 ///
-/// Clones the global settings — the caller's settings handle remains valid.
+/// # Ownership
+/// **Transfers** ownership of `settings` to the returned converter.  The caller
+/// must not use or destroy `settings` after this call.  `wkhtmltopdf_destroy_converter`
+/// will free the converter together with its owned `GlobalSettings`.
+///
+/// This matches upstream wkhtmltopdf's `pdf.h` semantics, where
+/// `wkhtmltopdf_destroy_converter` is responsible for freeing the settings.
 ///
 /// # Safety
-/// `settings` must be a live pointer or null (null returns null).
+/// `settings` must be a live pointer returned by
+/// `wkhtmltopdf_create_global_settings`, or null.  If null, null is returned
+/// and no settings are consumed.
 #[no_mangle]
 pub unsafe extern "C" fn wkhtmltopdf_create_converter(
     settings: *mut WkGlobalSettings,
@@ -404,7 +422,10 @@ pub unsafe extern "C" fn wkhtmltopdf_create_converter(
         if settings.is_null() {
             return std::ptr::null_mut();
         }
-        let gs = (*settings).clone();
+        // SAFETY: Caller guarantees `settings` is a live pointer from
+        // `wkhtmltopdf_create_global_settings`.  We take ownership here;
+        // the caller must not use or destroy `settings` after this point.
+        let gs = *Box::from_raw(settings);
         Box::into_raw(Box::new(CConverter::new(gs)))
     }))
     .unwrap_or(std::ptr::null_mut())
@@ -499,13 +520,18 @@ pub unsafe extern "C" fn wkhtmltopdf_set_finished_callback(
 /// `wkhtmltopdf_add_object(converter, object_settings, data)`.
 ///
 /// If `data` is non-null (and non-empty), it is used as inline HTML source.
-/// If `data` is null, the `page` field from `object_settings` is used as a
-/// URL.
+/// If `data` is null, the `page` field from `object_settings` is used as a URL.
 ///
-/// Clones the object settings — the caller's handle remains valid.
+/// # Ownership
+/// **Transfers** ownership of `object_settings` to the converter — the caller
+/// must not use or destroy `object_settings` after this call.  The owned
+/// `PdfObjectSettings` is freed when the converter is destroyed.
+///
+/// This matches upstream wkhtmltopdf's `pdf.h` semantics.
 ///
 /// # Safety
-/// `converter` and `object_settings` must be live pointers or null.
+/// `converter` and `object_settings` must be live pointers or null.  If either
+/// is null the call is a no-op and ownership is NOT transferred.
 /// `data` may be null.
 #[no_mangle]
 pub unsafe extern "C" fn wkhtmltopdf_add_object(
@@ -517,7 +543,10 @@ pub unsafe extern "C" fn wkhtmltopdf_add_object(
         if converter.is_null() || object_settings.is_null() {
             return;
         }
-        let os = (*object_settings).clone();
+        // SAFETY: Caller guarantees `object_settings` is a live pointer from
+        // `wkhtmltopdf_create_object_settings`.  We take ownership here;
+        // the caller must not use or destroy `object_settings` after this point.
+        let os = *Box::from_raw(object_settings);
         let html: Option<String> = if data.is_null() {
             None
         } else {
@@ -568,6 +597,7 @@ pub unsafe extern "C" fn wkhtmltopdf_convert(converter: *mut CConverter) -> c_in
 
         if sources.is_empty() {
             error_emit(converter, "no objects to convert");
+            (*converter).http_error = 1;
             finished_emit(converter, 0);
             return 0;
         }
@@ -601,6 +631,7 @@ pub unsafe extern "C" fn wkhtmltopdf_convert(converter: *mut CConverter) -> c_in
             Ok(t) => t,
             Err(e) => {
                 error_emit(converter, &format!("tempfile: {e}"));
+                (*converter).http_error = 1;
                 finished_emit(converter, 0);
                 return 0;
             }
@@ -632,6 +663,7 @@ pub unsafe extern "C" fn wkhtmltopdf_convert(converter: *mut CConverter) -> c_in
                     }
                     Err(e) => {
                         error_emit(converter, &format!("read assembled output: {e}"));
+                        (*converter).http_error = 1;
                         finished_emit(converter, 0);
                         0
                     }
@@ -933,12 +965,14 @@ mod tests {
     fn phase_count_matches_phases_array() {
         unsafe {
             let gs = wkhtmltopdf_create_global_settings();
+            // gs ownership transferred to the converter here.
             let conv = wkhtmltopdf_create_converter(gs);
             assert!(!conv.is_null());
             let pc = wkhtmltopdf_phase_count(conv);
             assert_eq!(pc as usize, PHASES.len());
+            // destroy_converter also drops the owned GlobalSettings.
             wkhtmltopdf_destroy_converter(conv);
-            wkhtmltopdf_destroy_global_settings(gs);
+            // Do NOT call wkhtmltopdf_destroy_global_settings(gs) — double-free.
         }
     }
 
@@ -946,13 +980,14 @@ mod tests {
     fn phase_description_returns_known_string() {
         unsafe {
             let gs = wkhtmltopdf_create_global_settings();
+            // gs ownership transferred to the converter here.
             let conv = wkhtmltopdf_create_converter(gs);
             let desc = wkhtmltopdf_phase_description(conv, 0);
             assert!(!desc.is_null());
             let s = CStr::from_ptr(desc).to_str().unwrap();
             assert_eq!(s, PHASES[0]);
             wkhtmltopdf_destroy_converter(conv);
-            wkhtmltopdf_destroy_global_settings(gs);
+            // Do NOT call wkhtmltopdf_destroy_global_settings(gs) — double-free.
         }
     }
 
@@ -960,13 +995,14 @@ mod tests {
     fn phase_description_out_of_range_returns_empty() {
         unsafe {
             let gs = wkhtmltopdf_create_global_settings();
+            // gs ownership transferred to the converter here.
             let conv = wkhtmltopdf_create_converter(gs);
             let desc = wkhtmltopdf_phase_description(conv, 999);
             assert!(!desc.is_null());
             let s = CStr::from_ptr(desc).to_str().unwrap();
             assert_eq!(s, "");
             wkhtmltopdf_destroy_converter(conv);
-            wkhtmltopdf_destroy_global_settings(gs);
+            // Do NOT call wkhtmltopdf_destroy_global_settings(gs) — double-free.
         }
     }
 
@@ -974,13 +1010,14 @@ mod tests {
     fn get_output_before_convert_is_zero_length() {
         unsafe {
             let gs = wkhtmltopdf_create_global_settings();
+            // gs ownership transferred to the converter here.
             let conv = wkhtmltopdf_create_converter(gs);
             let mut ptr: *const c_uchar = std::ptr::null();
             let len = wkhtmltopdf_get_output(conv, &mut ptr);
             assert_eq!(len, 0);
             // ptr may be non-null (pointing at an empty Vec's ptr()) — that's OK.
             wkhtmltopdf_destroy_converter(conv);
-            wkhtmltopdf_destroy_global_settings(gs);
+            // Do NOT call wkhtmltopdf_destroy_global_settings(gs) — double-free.
         }
     }
 
@@ -989,6 +1026,7 @@ mod tests {
         unsafe {
             let gs = wkhtmltopdf_create_global_settings();
             let os = wkhtmltopdf_create_object_settings();
+            // gs ownership transferred to the converter here.
             let conv = wkhtmltopdf_create_converter(gs);
 
             wkhtmltopdf_set_warning_callback(conv, None);
@@ -998,11 +1036,61 @@ mod tests {
             wkhtmltopdf_set_finished_callback(conv, None);
 
             let data = CString::new("<h1>test</h1>").unwrap();
+            // os ownership transferred to the converter here.
             wkhtmltopdf_add_object(conv, os, data.as_ptr());
 
+            // destroy_converter drops the converter, its owned GlobalSettings,
+            // and all owned PdfObjectSettings.
             wkhtmltopdf_destroy_converter(conv);
-            wkhtmltopdf_destroy_object_settings(os);
-            wkhtmltopdf_destroy_global_settings(gs);
+            // Do NOT call destroy_object_settings(os) or
+            // destroy_global_settings(gs) — both would be double-frees.
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Ownership transfer tests — verify no double-free path.
+    // -----------------------------------------------------------------------
+
+    /// After passing `gs` to `create_converter`, the caller must NOT destroy it.
+    /// `destroy_converter` frees the converter AND its owned `GlobalSettings`.
+    #[test]
+    fn create_converter_takes_ownership_no_double_free() {
+        unsafe {
+            let gs = wkhtmltopdf_create_global_settings();
+            assert!(!gs.is_null());
+
+            // Ownership transferred — do not call destroy_global_settings.
+            let conv = wkhtmltopdf_create_converter(gs);
+            assert!(!conv.is_null());
+
+            // This frees the converter AND the owned GlobalSettings.
+            wkhtmltopdf_destroy_converter(conv);
+            // Calling destroy_global_settings(gs) here would be a double-free.
+        }
+    }
+
+    /// After passing `os` to `add_object`, the caller must NOT destroy it.
+    /// `destroy_converter` frees all owned `PdfObjectSettings` too.
+    #[test]
+    fn add_object_takes_ownership_no_double_free() {
+        unsafe {
+            let gs = wkhtmltopdf_create_global_settings();
+            assert!(!gs.is_null());
+            let os = wkhtmltopdf_create_object_settings();
+            assert!(!os.is_null());
+
+            // gs ownership transferred.
+            let conv = wkhtmltopdf_create_converter(gs);
+            assert!(!conv.is_null());
+
+            let data = CString::new("<p>ownership test</p>").unwrap();
+            // os ownership transferred.
+            wkhtmltopdf_add_object(conv, os, data.as_ptr());
+
+            // Frees converter + owned GlobalSettings + owned PdfObjectSettings.
+            wkhtmltopdf_destroy_converter(conv);
+            // Calling destroy_object_settings(os) or destroy_global_settings(gs)
+            // here would be double-frees.
         }
     }
 
@@ -1060,9 +1148,10 @@ mod tests {
             let header = std::slice::from_raw_parts(out_ptr, 4.min(len as usize));
             assert_eq!(header, b"%PDF", "output must start with %PDF");
 
+            // destroy_converter also frees the owned GlobalSettings (gs) and
+            // PdfObjectSettings (os) — do NOT call their individual destroy
+            // functions, which would be double-frees.
             wkhtmltopdf_destroy_converter(conv);
-            wkhtmltopdf_destroy_object_settings(os);
-            wkhtmltopdf_destroy_global_settings(gs);
         }
     }
 }
