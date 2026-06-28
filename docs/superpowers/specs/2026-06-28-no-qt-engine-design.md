@@ -1,7 +1,7 @@
 # Design: A Qt-free, drop-in HTML→PDF/Image engine ("wkhtmltox-rs")
 
 - **Date:** 2026-06-28
-- **Status:** Design — **engine decision finalized via spikes** (SPIKE 1 GO, SPIKE 2 NO-GO); ready for Milestone 1 planning.
+- **Status:** **Milestone 1 COMPLETE & verified** (2026-06-28) — Cargo workspace + safe-Rust core (`Renderer` trait, DTOs, `WkError`, `MockRenderer`) + pure-Rust Chromium/CDP renderer (open/wait_ready/eval_json/print_pdf, gated e2e passing) + QPDF FFI shim + AcroForm spike (top risk RETIRED) + fidelity-measurement harness vs the 0.12.6 oracle. Engine decision finalized via spikes (§11); fidelity decision in §12. **Next: legacy-compat-profile milestone.**
 - **Topic:** Replace wkhtmltopdf/wkhtmltoimage's Qt/QtWebKit core with a Qt-free engine that reproduces its features, while remaining a drop-in replacement at both the CLI and C-ABI levels.
 - **Repo context:** This document lives in the macOS-arm64 fork of wkhtmltopdf. The existing product is built on a *vendored, patched Qt 4.8.7 / QtWebKit* (the `qt/` submodule). This design describes a *new* engine, not a modification of the current one.
 
