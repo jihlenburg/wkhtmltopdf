@@ -3,5 +3,6 @@
 pub mod compat;
 pub mod error;
 pub mod render;
+pub mod outline;
 pub mod testing;
 pub use error::{Result, WkError};

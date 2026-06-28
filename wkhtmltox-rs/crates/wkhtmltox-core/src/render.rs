@@ -31,13 +31,10 @@ pub struct LoadSettings {
     pub compat_ua_css: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReadyPolicy {
     pub javascript_delay_ms: u64,
     pub window_status: Option<String>,
-}
-impl Default for ReadyPolicy {
-    fn default() -> Self { Self { javascript_delay_ms: 0, window_status: None } }
 }
 
 #[derive(Debug, Clone, Copy)]
