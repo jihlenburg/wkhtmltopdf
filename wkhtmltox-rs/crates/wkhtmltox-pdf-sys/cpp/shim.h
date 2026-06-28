@@ -10,6 +10,8 @@ int wkx_pdf_merge(const char** in_paths, int n, const char* out_path);
 int wkx_pdf_set_outline(const char* in_path, const char* out_path,
                         const char** titles, const int* pages,
                         const int* levels, int n);
+int wkx_pdf_stamp_footer(const char* in_path, const char* out_path,
+                         const char* fmt, int start);
 #ifdef __cplusplus
 }
 #endif

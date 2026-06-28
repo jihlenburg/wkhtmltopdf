@@ -1,12 +1,14 @@
 // wkhtmltox-rs — LGPL-3.0-or-later.
 #include "shim.h"
 #include <string>
+#include <sstream>
 #include <vector>
 #include <qpdf/QPDF.hh>
 #include <qpdf/QPDFWriter.hh>
 #include <qpdf/QPDFObjectHandle.hh>
 #include <qpdf/QPDFAcroFormDocumentHelper.hh>
 #include <qpdf/QPDFPageDocumentHelper.hh>
+#include <qpdf/QPDFPageObjectHelper.hh>
 #include <qpdf/QPDFFormFieldObjectHelper.hh>
 #include <qpdf/QPDFAnnotationObjectHelper.hh>
 
@@ -223,6 +225,100 @@ extern "C" int wkx_pdf_set_outline(const char* in_path, const char* out_path,
 
         // Attach outlines to the document catalog.
         q.getRoot().replaceKey("/Outlines", outlines);
+
+        QPDFWriter w(q, out_path);
+        w.write();
+        return 0;
+    } catch (const std::exception&) {
+        return 1;
+    } catch (...) {
+        return 2;
+    }
+}
+
+// Stamp a centered page-number footer on each page.
+// fmt: format string with [page] and [topage] tokens.
+// start: number assigned to the first page (e.g. 1).
+extern "C" int wkx_pdf_stamp_footer(const char* in_path, const char* out_path,
+                                    const char* fmt, int start) {
+    try {
+        QPDF q;
+        q.processFile(in_path);
+
+        QPDFPageDocumentHelper pdh(q);
+        auto pages = pdh.getAllPages();
+        int page_count = (int)pages.size();
+
+        if (page_count == 0) {
+            QPDFWriter w(q, out_path);
+            w.write();
+            return 0;
+        }
+
+        int topage = start + page_count - 1;
+
+        for (int i = 0; i < page_count; ++i) {
+            QPDFObjectHandle page = pages[i].getObjectHandle();
+
+            // Substitute [page] and [topage] tokens.
+            std::string text(fmt);
+            std::string page_str = std::to_string(start + i);
+            std::string topage_str = std::to_string(topage);
+            size_t pos;
+            while ((pos = text.find("[page]")) != std::string::npos)
+                text.replace(pos, 6, page_str);
+            while ((pos = text.find("[topage]")) != std::string::npos)
+                text.replace(pos, 8, topage_str);
+
+            // Escape PDF string special characters: '(', ')', '\'.
+            std::string escaped;
+            escaped.reserve(text.size());
+            for (char c : text) {
+                if (c == '(' || c == ')' || c == '\\')
+                    escaped += '\\';
+                escaped += c;
+            }
+
+            // Determine page width from /MediaBox (default to 595 if absent).
+            double page_width = 595.0;
+            if (page.hasKey("/MediaBox")) {
+                QPDFObjectHandle mb = page.getKey("/MediaBox");
+                if (mb.isArray() && mb.getArrayNItems() >= 4) {
+                    double llx = mb.getArrayItem(0).getNumericValue();
+                    double urx = mb.getArrayItem(2).getNumericValue();
+                    page_width = urx - llx;
+                }
+            }
+
+            // Approximate centred x position.
+            double x = (page_width / 2.0) - (text.size() * 2.5);
+            if (x < 10.0) x = 10.0;
+
+            // Build the content stream.
+            std::ostringstream ss;
+            ss << "q BT /WKXF 9 Tf " << (int)x << " 18 Td ("
+               << escaped << ") Tj ET Q\n";
+            std::string content = ss.str();
+
+            // Ensure /Resources and /Font exist on the page, then add /WKXF.
+            if (!page.hasKey("/Resources"))
+                page.replaceKey("/Resources", QPDFObjectHandle::newDictionary());
+            QPDFObjectHandle res = page.getKey("/Resources");
+            if (!res.hasKey("/Font"))
+                res.replaceKey("/Font", QPDFObjectHandle::newDictionary());
+            QPDFObjectHandle font_dict = res.getKey("/Font");
+            if (!font_dict.hasKey("/WKXF")) {
+                QPDFObjectHandle font = QPDFObjectHandle::newDictionary();
+                font.replaceKey("/Type",     QPDFObjectHandle::newName("/Font"));
+                font.replaceKey("/Subtype",  QPDFObjectHandle::newName("/Type1"));
+                font.replaceKey("/BaseFont", QPDFObjectHandle::newName("/Helvetica"));
+                font_dict.replaceKey("/WKXF", font);
+            }
+
+            // Append the footer content stream after existing page contents.
+            QPDFObjectHandle stream = QPDFObjectHandle::newStream(&q, content);
+            QPDFPageObjectHelper(page).addPageContents(stream, false);
+        }
 
         QPDFWriter w(q, out_path);
         w.write();

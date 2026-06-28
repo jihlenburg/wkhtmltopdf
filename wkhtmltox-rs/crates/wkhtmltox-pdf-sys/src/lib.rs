@@ -19,6 +19,12 @@ extern "C" {
         levels: *const c_int,
         n: c_int,
     ) -> c_int;
+    fn wkx_pdf_stamp_footer(
+        in_path: *const c_char,
+        out_path: *const c_char,
+        fmt: *const c_char,
+        start: c_int,
+    ) -> c_int;
 }
 
 /// Safe wrapper: build a nested PDF `/Outlines` (bookmarks) tree on a copy of `in_path`
@@ -56,6 +62,31 @@ pub fn set_outline(
         Ok(())
     } else {
         Err(format!("wkx_pdf_set_outline rc={rc}"))
+    }
+}
+
+/// Safe wrapper: stamp a centered page-number footer on every page of `in_path`,
+/// writing the result to `out_path`.
+///
+/// `fmt` may contain `[page]` (substituted with the current page number) and `[topage]`
+/// (substituted with the last page number).  `start` is the number assigned to the first page
+/// (typically `1`).
+pub fn stamp_footer(
+    in_path: &Path,
+    out_path: &Path,
+    fmt: &str,
+    start: u32,
+) -> Result<(), String> {
+    let ci = CString::new(in_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let co = CString::new(out_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let cf = CString::new(fmt.as_bytes()).map_err(|e| e.to_string())?;
+    let rc = unsafe {
+        wkx_pdf_stamp_footer(ci.as_ptr(), co.as_ptr(), cf.as_ptr(), start as c_int)
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(format!("wkx_pdf_stamp_footer rc={rc}"))
     }
 }
 
