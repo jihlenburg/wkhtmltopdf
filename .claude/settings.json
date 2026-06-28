@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "bash scripts/security-audit.sh",
+            "asyncRewake": true,
+            "rewakeSummary": "Security audit flagged HIGH findings",
+            "rewakeMessage": "Post-feature security audit found HIGH-severity issue(s) — review the report under .superpowers/security/ before continuing:",
+            "timeout": 300,
+            "statusMessage": "Running post-feature security audit"
+          }
+        ]
+      }
+    ]
+  }
+}
