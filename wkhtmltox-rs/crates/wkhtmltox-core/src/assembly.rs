@@ -39,6 +39,18 @@ pub struct AssembleOpts {
     pub header_footer_font_size: f64,
     /// Document title substituted for `[title]` in header/footer templates.
     pub doc_title: String,
+    /// An optional cover page rendered as the very first object.
+    ///
+    /// The cover is **excluded** from:
+    /// - the outline/bookmark tree (no headings are extracted from it),
+    /// - the Table of Contents (TOC entries come only from content objects),
+    /// - header/footer stamping: the first `cover_pages` entries in the
+    ///   per-page cells array are all-empty so the cover receives no stamp,
+    /// - page numbering: `[page]` = 1 on the first non-cover page;
+    ///   `[topage]` = total pages minus cover pages.
+    ///
+    /// `None` = no cover page.
+    pub cover: Option<Source>,
 }
 
 impl Default for AssembleOpts {
@@ -50,6 +62,7 @@ impl Default for AssembleOpts {
             footer: None,
             header_footer_font_size: 9.0,
             doc_title: String::new(),
+            cover: None,
         }
     }
 }
@@ -69,6 +82,11 @@ pub struct AssemblyReport {
 /// is rendered as a leading object and its page count is stabilised via a
 /// fixed-point loop (cap 3 iterations) so that the page numbers printed in the
 /// TOC match the final document layout.
+///
+/// When `opts.cover` is `Some(src)` the cover is rendered first and placed before
+/// the TOC (if any) and all content pages.  The cover is excluded from the bookmark
+/// tree, TOC, and all header/footer/numbering stamps; `[page]` starts at 1 on the
+/// first non-cover page and `[topage]` equals the total non-cover page count.
 ///
 /// # Per-heading page accuracy
 /// For each part PDF that contains an `/Outlines` tree (emitted by Chromium via
@@ -92,16 +110,30 @@ pub fn assemble_pdf(
     // TempDir auto-removes on drop — cleanup is now unconditional (leak-on-error fixed).
     let work = tempfile::TempDir::new().map_err(|e| WkError::Io(e.to_string()))?;
 
+    // Render cover page first (before the TOC/non-TOC dispatch) so that both
+    // paths share the same rendered cover artefact and cover_pages value.
+    let (cover_path_opt, cover_pages) =
+        render_cover(r, geom, work.path(), opts)?;
+
     // ── TOC path ──────────────────────────────────────────────────────────────
     if opts.with_toc {
-        return assemble_with_toc(r, objects, geom, out, opts, work.path());
+        return assemble_with_toc(
+            r,
+            objects,
+            geom,
+            out,
+            opts,
+            work.path(),
+            (cover_path_opt.as_deref(), cover_pages),
+        );
         // `work` drops here after assemble_with_toc returns.
     }
 
     // ── Non-TOC path ──────────────────────────────────────────────────────────
     let mut outline_items: Vec<(String, u32, u8)> = Vec::new();
-    let mut offset: u32 = 0;
-    let mut parts: Vec<std::path::PathBuf> = Vec::with_capacity(objects.len());
+    // Content page offset: begins after the cover (0 if no cover).
+    let mut content_offset: u32 = 0;
+    let mut content_parts: Vec<PathBuf> = Vec::with_capacity(objects.len());
 
     for (i, src) in objects.iter().enumerate() {
         let p = r.open(src, &LoadSettings::default())?;
@@ -121,23 +153,32 @@ pub fn assemble_pdf(
         let engine_entries = crate::pdfread::extract_outline(&part);
         if !engine_entries.is_empty() {
             for (title, local_page, level) in engine_entries {
-                outline_items.push((title, local_page + offset, level));
+                outline_items.push((title, cover_pages + content_offset + local_page, level));
             }
         } else {
             for h in outline::parse_probe(&probe) {
-                outline_items.push((h.text, offset, h.level));
+                outline_items.push((h.text, cover_pages + content_offset, h.level));
             }
         }
 
-        offset += n;
-        parts.push(part);
+        content_offset += n;
+        content_parts.push(part);
     }
 
-    // Merge all part PDFs into a single document.
+    let total_pages = cover_pages + content_offset;
+
+    // Merge: cover (if present) followed by all content parts.
+    let mut parts: Vec<PathBuf> = Vec::with_capacity(1 + content_parts.len());
+    if let Some(cp) = cover_path_opt {
+        parts.push(cp);
+    }
+    parts.extend(content_parts);
+
     let merged = work.path().join("merged.pdf");
     wkhtmltox_pdf_sys::merge(&parts, &merged).map_err(WkError::Pdf)?;
 
     // Optionally embed the combined outline (bookmarks).
+    // Note: the cover contributes no bookmark entries — its pages are skipped.
     let after_outline = if !outline_items.is_empty() {
         let outlined = work.path().join("outlined.pdf");
         wkhtmltox_pdf_sys::set_outline(&merged, &outlined, &outline_items)
@@ -150,6 +191,8 @@ pub fn assemble_pdf(
     // Optionally stamp simple page-number footers (legacy `number` path).
     // Skipped when header/footer cells are configured — the user should put
     // `[page]` in their template instead.
+    // Note: this path is not cover-aware (all pages including the cover are
+    // stamped). For cover-page-aware numbering, use `footer.center = "[page]/[topage]"`.
     let has_cells = opts.header.is_some() || opts.footer.is_some();
     let before_cells = if opts.number && !has_cells {
         let numbered = work.path().join("numbered.pdf");
@@ -161,14 +204,17 @@ pub fn assemble_pdf(
     };
 
     // Optionally stamp variable header/footer cells.
+    // Cover pages receive all-empty cells (no stamp); non-cover pages are
+    // numbered from 1 with [topage] = total_pages - cover_pages.
     let final_path = if has_cells {
         let stamped = work.path().join("cells.pdf");
-        let cell_strings = build_cell_strings(opts, &outline_items, offset);
+        let cell_strings =
+            build_cell_strings(opts, &outline_items, total_pages, cover_pages);
         wkhtmltox_pdf_sys::stamp_cells(
             &before_cells,
             &stamped,
             &cell_strings,
-            offset,
+            total_pages,
             opts.header_footer_font_size,
         )
         .map_err(WkError::Pdf)?;
@@ -182,15 +228,41 @@ pub fn assemble_pdf(
 
     // `work` drops here → TempDir removes the directory unconditionally.
     Ok(AssemblyReport {
-        pages: offset,
+        pages: total_pages,
         objects: objects.len(),
     })
+}
+
+/// Render the optional cover page from `opts.cover` into `work/cover.pdf`.
+///
+/// Returns `(Some(cover_path), cover_page_count)` when a cover is configured,
+/// or `(None, 0)` when `opts.cover` is `None`.
+fn render_cover(
+    r: &mut dyn Renderer,
+    geom: &PageGeometry,
+    work: &Path,
+    opts: &AssembleOpts,
+) -> Result<(Option<PathBuf>, u32)> {
+    if let Some(cover_src) = &opts.cover {
+        let cv = r.open(cover_src, &LoadSettings::default())?;
+        r.wait_ready(cv, &ReadyPolicy::default())?;
+        let bytes = r.print_pdf(cv, geom)?;
+        let cpath = work.join("cover.pdf");
+        std::fs::write(&cpath, &bytes).map_err(|e| WkError::Io(e.to_string()))?;
+        let n = wkhtmltox_pdf_sys::page_count(&cpath).map_err(WkError::Pdf)?;
+        Ok((Some(cpath), n))
+    } else {
+        Ok((None, 0))
+    }
 }
 
 /// Inner implementation of the TOC + fixed-point loop path.
 ///
 /// Called only when `opts.with_toc = true`; separated so the `TempDir` borrow in
 /// the caller stays in scope across the copy.
+///
+/// `cover` is a `(cover_path, cover_pages)` pair from the pre-rendered cover (if
+/// any); the cover is prepended to the merged output before the TOC and content.
 fn assemble_with_toc(
     r: &mut dyn Renderer,
     objects: &[Source],
@@ -198,7 +270,9 @@ fn assemble_with_toc(
     out: &Path,
     opts: &AssembleOpts,
     work: &Path,
+    cover: (Option<&Path>, u32),
 ) -> Result<AssemblyReport> {
+    let (cover_path, cover_pages) = cover;
     // ── Phase 1: render all content objects ───────────────────────────────────
     struct ContentPart {
         path: PathBuf,
@@ -241,9 +315,10 @@ fn assemble_with_toc(
     // content, which may change the TOC page count.  We iterate until the TOC
     // page count stabilises (or cap at MAX_ITERS and log a warning).
     //
-    // cover_pages = 0 here; Task 4 will wire the cover offset.
+    // Global page layout (0-based):
+    //   [cover_pages ... | toc_pages ... | content_pages ...]
+    //   cover_pages is constant; toc_pages is what we are solving for.
 
-    let cover_pages: u32 = 0;
     let mut toc_pages: u32 = 1; // initial estimate: assume 1 TOC page
     const MAX_ITERS: u32 = 3;
 
@@ -253,7 +328,7 @@ fn assemble_with_toc(
 
     for _iter in 0..MAX_ITERS {
         // Recompute global (0-based) page offsets for every heading, assuming
-        // the TOC occupies `toc_pages` pages.
+        // the TOC occupies `toc_pages` pages placed after `cover_pages` pages.
         outline_items.clear();
         let mut prior: u32 = 0;
         for cp in &content_parts {
@@ -298,21 +373,28 @@ fn assemble_with_toc(
         );
     }
 
-    // ── Phase 3: assemble [toc, content…] and set outline ─────────────────────
+    // ── Phase 3: assemble [cover?][toc][content…] and set outline ─────────────
 
-    // Prepend a top-level "Table of Contents" bookmark pointing at the TOC itself.
+    // Prepend a top-level "Table of Contents" bookmark pointing at the first
+    // TOC page.  Content headings follow with their global 0-based page numbers.
+    // The cover is excluded from the bookmark tree entirely.
     let mut all_outline: Vec<(String, u32, u8)> = Vec::with_capacity(1 + outline_items.len());
     all_outline.push(("Table of Contents".to_string(), cover_pages, 1u8));
     all_outline.extend_from_slice(&outline_items);
 
-    let mut parts: Vec<PathBuf> = Vec::with_capacity(1 + content_parts.len());
+    // Merge order: cover (if any) → TOC → content objects.
+    let mut parts: Vec<PathBuf> =
+        Vec::with_capacity(cover_path.map_or(0, |_| 1) + 1 + content_parts.len());
+    if let Some(cp) = cover_path {
+        parts.push(cp.to_owned());
+    }
     parts.push(final_toc_path);
     for cp in &content_parts {
         parts.push(cp.path.clone());
     }
 
     let content_pages: u32 = content_parts.iter().map(|cp| cp.page_count).sum();
-    let total_pages = toc_pages + content_pages;
+    let total_pages = cover_pages + toc_pages + content_pages;
 
     let merged = work.join("merged.pdf");
     wkhtmltox_pdf_sys::merge(&parts, &merged).map_err(WkError::Pdf)?;
@@ -338,9 +420,11 @@ fn assemble_with_toc(
     };
 
     // Optionally stamp variable header/footer cells.
+    // Cover pages receive all-empty cells; non-cover pages numbered from 1.
     let final_path = if has_cells {
         let stamped = work.join("cells.pdf");
-        let cell_strings = build_cell_strings(opts, &all_outline, total_pages);
+        let cell_strings =
+            build_cell_strings(opts, &all_outline, total_pages, cover_pages);
         wkhtmltox_pdf_sys::stamp_cells(
             &before_cells,
             &stamped,
@@ -368,23 +452,41 @@ fn assemble_with_toc(
 /// `p` the six entries at `p*6+0..5` are:
 /// `[top-left, top-center, top-right, bottom-left, bottom-center, bottom-right]`.
 ///
+/// # Cover page convention
+/// The first `cover_pages` pages (0-based indices `0..cover_pages`) receive
+/// six empty strings each — no header or footer is stamped on the cover.
+/// For non-cover pages:
+/// - `[page]` = `global_page_0based - cover_pages + 1`  (starts at 1)
+/// - `[topage]` = `total_pages - cover_pages`            (excludes cover)
+///
 /// Token substitution is performed here in Rust; the shim is a dumb stamper.
 fn build_cell_strings(
     opts: &AssembleOpts,
     outline_items: &[(String, u32, u8)],
     total_pages: u32,
+    cover_pages: u32,
 ) -> Vec<String> {
+    let non_cover_pages = total_pages.saturating_sub(cover_pages);
     let (date, time) = crate::headerfooter::now_date_time();
     let mut cells: Vec<String> = Vec::with_capacity(total_pages as usize * 6);
 
     for page_0based in 0..total_pages {
-        let page_1based = page_0based + 1;
+        // Cover pages: emit all-empty cells — no header/footer stamp.
+        if page_0based < cover_pages {
+            for _ in 0..6 {
+                cells.push(String::new());
+            }
+            continue;
+        }
+
+        // Non-cover pages: page numbering starts at 1; [topage] = non_cover_pages.
+        let page_1based = page_0based - cover_pages + 1;
         let (section, subsection) =
             crate::headerfooter::active_section_subsection(outline_items, page_0based);
 
         let ctx = crate::headerfooter::PageCtx {
             page: page_1based,
-            topage: total_pages,
+            topage: non_cover_pages,
             frompage: 1,
             section,
             subsection,
