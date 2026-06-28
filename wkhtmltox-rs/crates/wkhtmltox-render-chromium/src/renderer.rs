@@ -784,7 +784,7 @@ impl Renderer for ChromiumRenderer {
         // Best-effort: if smart_width is enabled and a width was set, measure
         // the page's scroll width and re-issue setDeviceMetricsOverride with the
         // larger of the two values so content is not clipped.  Approximate only.
-        if let Some(dm) = &self.device_metrics.clone() {
+        if let Some(dm) = self.device_metrics.clone() {
             if dm.smart_width && dm.width > 0 {
                 let configured_w = dm.width;
                 let scroll_val = self.call_pumping(

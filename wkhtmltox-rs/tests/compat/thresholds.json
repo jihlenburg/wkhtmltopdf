@@ -1,4 +1,5 @@
 {
+  "_comment": "Floors tuned to the DEFAULT corpus (tests/compat/corpus). The richer legacy corpus diverges more on cross-engine font rendering — run it WITHOUT --gate (informational). Re-tune per corpus.",
   "mean_ssim": 0.68,
   "outline_ratio": 0.95,
   "text_sim": 0.90,

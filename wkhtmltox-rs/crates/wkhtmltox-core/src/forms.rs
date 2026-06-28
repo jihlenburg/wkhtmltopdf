@@ -86,7 +86,8 @@ mod tests {
     #[test]
     fn skips_unnamed_and_degenerate() {
         let v = serde_json::json!({ "fields": [
-            { "name": "", "kind": "text", "top": 0.0, "rect": [0.0, 0.0, 10.0, 10.0] }
+            { "name": "", "kind": "text", "top": 0.0, "rect": [0.0, 0.0, 10.0, 10.0] },
+            { "name": "x", "kind": "text", "top": 5.0, "rect": [5.0, 5.0, 5.0, 20.0] }
         ]});
         assert!(parse_form_fields(&v).is_empty());
     }

@@ -938,10 +938,7 @@ mod tests {
 
     #[test]
     fn image_settings_forward_zoom_and_screen_width_to_device_metrics() {
-        let mut g = ImageGlobalSettings::default();
-        g.zoom = 2.0;
-        g.screen_width = Some(800);
-        g.smart_width = false;
+        let g = ImageGlobalSettings { zoom: 2.0, screen_width: Some(800), smart_width: false, ..Default::default() };
         let ls = g.to_load_settings();
         let dm = ls.device_metrics.expect("device_metrics set when zoom/width given");
         assert_eq!(dm.width, 800);

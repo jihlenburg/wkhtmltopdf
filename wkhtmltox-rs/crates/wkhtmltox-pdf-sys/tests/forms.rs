@@ -7,11 +7,10 @@ mod common;
 fn adds_two_text_fields_to_acroform() {
     // Build a minimal one-page PDF via the shared helper used by the other
     // integration tests (mirrors acroform.rs / roundtrip.rs fixture setup).
-    let dir = std::env::temp_dir();
-    let path = dir.join("wkx_forms_two_fields_in.pdf");
-    let path_str = path.to_string_lossy().to_string();
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path_str = tmp.path().to_string_lossy().to_string();
     common::write_min_pdf(&path_str, 1);
-    let pdf = std::fs::read(&path).expect("read input pdf");
+    let pdf = std::fs::read(tmp.path()).expect("read input pdf");
 
     let out = add_text_fields(
         &pdf,

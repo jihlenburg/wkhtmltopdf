@@ -6,8 +6,7 @@ use wkhtmltox_render_chromium::renderer::{ChromiumRenderer, FetchDecision, fetch
 #[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
 fn snapshot_honors_screen_width_via_device_metrics() {
     let mut r = ChromiumRenderer::spawn().unwrap();
-    let mut load = LoadSettings::default();
-    load.device_metrics = Some(DeviceMetrics { width: 800, height: 0, device_scale_factor: 1.0, smart_width: false });
+    let load = LoadSettings { device_metrics: Some(DeviceMetrics { width: 800, height: 0, device_scale_factor: 1.0, smart_width: false }), ..Default::default() };
     let p = r.open(&Source::Html("<html><body style='margin:0'><div style='width:100%'>x</div></body></html>".into()), &load).unwrap();
     r.wait_ready(p, &ReadyPolicy::default()).unwrap();
     let raw = r.snapshot(p, &SnapshotOpts { format: ImageFormat::Png, crop: None, scale: 1.0, quality: 90 }).unwrap();
