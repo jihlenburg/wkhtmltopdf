@@ -77,7 +77,7 @@
       |:---------------------|:----------:|:--------:|:-----:|
       | (a) success          |          0 |        0 | YES   |
       | (b) unknown flag     |          1 |        1 | YES   |
-      | (c) missing input    |          1 |        0 | NO    |
+      | (c) missing input    |          1 |        1 | YES   |
 
       ### Notes on exit codes
 

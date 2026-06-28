@@ -77,9 +77,9 @@
     },
     "missing_input": {
       "oracle_rc": 1,
-      "our_rc": 0,
-      "match": false,
-      "note": "our binary converts local paths to file:// URLs; Chrome renders an error page silently (exit 0 vs oracle exit nonzero)."
+      "our_rc": 1,
+      "match": true,
+      "note": null
     }
   }
 }

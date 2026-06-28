@@ -72,6 +72,22 @@ fn run(args: &[String]) -> i32 {
         return 1;
     }
 
+    // ── Validate: File inputs must exist on disk (Fix 2) ─────────────────────
+    for (_, inp) in &inv.objects {
+        if let Input::File(path) = inp {
+            if !std::path::Path::new(path).exists() {
+                eprintln!("wkhtmltopdf: error: input file not found: {path}");
+                return 1;
+            }
+        }
+    }
+    if let Some(Input::File(path)) = &inv.cover {
+        if !std::path::Path::new(path).exists() {
+            eprintln!("wkhtmltopdf: error: cover file not found: {path}");
+            return 1;
+        }
+    }
+
     // ── Handle stdin inputs ───────────────────────────────────────────────────
     // Read stdin once and write it to a temp .html file so it can be loaded
     // via a file:// URL.  The file guard is kept alive until after assembly.
@@ -184,6 +200,11 @@ fn run(args: &[String]) -> i32 {
                     eprintln!("wkhtmltopdf: stdout write failed: {e}");
                     return 1;
                 }
+                // Flush before process::exit skips destructors (Fix 3).
+                if let Err(e) = io::stdout().flush() {
+                    eprintln!("wkhtmltopdf: stdout flush failed: {e}");
+                    return 1;
+                }
             }
             Err(e) => {
                 eprintln!("wkhtmltopdf: failed to read output tempfile: {e}");
@@ -212,15 +233,40 @@ fn resolve_input(inp: &Input, stdin_temp: Option<&NamedTempFile>) -> Result<Sour
         Input::Url(u) => Ok(Source::Url(u.clone())),
         Input::File(p) => {
             let abs = make_absolute(p)?;
-            Ok(Source::Url(format!("file://{}", abs.display())))
+            // Percent-encode path so spaces, #, ?, % and other special bytes
+            // are valid in the file:// URL (Fix 4).
+            Ok(Source::Url(format!("file://{}", percent_encode_path(&abs))))
         }
         Input::Stdin => {
-            let tf = stdin_temp.expect(
-                "stdin_temp must be populated before resolving Stdin inputs",
-            );
-            Ok(Source::Url(format!("file://{}", tf.path().display())))
+            // Return Err instead of panicking when the caller forgot to call
+            // read_stdin_to_temp (Fix 5).
+            let tf = stdin_temp.ok_or_else(|| {
+                "internal error: stdin_temp not populated before resolving Stdin inputs"
+                    .to_string()
+            })?;
+            Ok(Source::Url(format!("file://{}", percent_encode_path(tf.path()))))
         }
     }
+}
+
+/// Percent-encode a file-system path for use in a `file://` URL (Fix 4).
+///
+/// Keeps unreserved URI characters (RFC 3986 §2.3) and the path-safe bytes
+/// `/`, `:`, and `@` unencoded; encodes everything else as `%XX`.  In
+/// practice this covers space, `#`, `?`, `%`, and any non-ASCII byte.
+fn percent_encode_path(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    let mut out = String::with_capacity(s.len() + 16);
+    for &byte in s.as_bytes() {
+        match byte {
+            // Unreserved (RFC 3986 §2.3) + path-safe chars kept as-is.
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~'
+            | b'/' | b':' | b'@' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// Read all of stdin and write it to a named temp file with a `.html` suffix.

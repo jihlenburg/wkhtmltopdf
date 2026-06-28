@@ -45,7 +45,7 @@
 
 #![forbid(unsafe_code)]
 
-use wkhtmltox_core::registry::{set_global, set_object};
+use wkhtmltox_core::registry::{get_global, set_global, set_object};
 use wkhtmltox_core::settings::{GlobalSettings, PdfObjectSettings};
 
 // ---------------------------------------------------------------------------
@@ -240,6 +240,13 @@ static FLAGS: &[FlagSpec] = &[
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// A queued per-object flag: `(cli_flag_long_name, dotted_registry_name, value)`.
+///
+/// The CLI flag name (without `--`) is carried alongside the dotted name so
+/// that error messages shown to the user reference the flag they typed rather
+/// than the internal dotted registry name.
+type FlagEntry = (String, String, String);
+
 fn arity_of(action: &Action) -> usize {
     match action {
         Action::Setting(_) => 1,
@@ -298,54 +305,62 @@ fn early_exit(mode: RunMode) -> ParsedInvocation {
 /// parse phase.
 ///
 /// * In the **leading phase** (`in_obj_phase = false`): `Target::Global` and
-///   `Target::Both` flags both call `set_global`.  If `set_global` returns
-///   an error (setting not in global scope), the flag is deferred into
-///   `pre_flags` so it reaches the first page's object.
+///   `Target::Both` flags both call `set_global`.  If the setting is unknown
+///   to global scope (e.g. `load.blockLocalFileAccess`), the flag is deferred
+///   into `pre_flags` so it reaches the first page's object.  If the value is
+///   invalid the error is returned immediately.
 /// * In the **object phase** (`in_obj_phase = true`): `Target::Global` flags
 ///   still call `set_global` (layout is document-level); `Target::Both` flags
 ///   are pushed to `pre_flags` for the upcoming page.
+///
+/// `cli_flag` is the long CLI flag name without the leading `--` (e.g.
+/// `"page-size"`); it is used in error messages so the user sees the flag they
+/// typed rather than the internal dotted registry name.
+#[allow(clippy::too_many_arguments)]
 fn apply_setting(
+    cli_flag: &str,
     name: &str,
     value: &str,
     target: Target,
     global: &mut GlobalSettings,
-    pre_flags: &mut Vec<(String, String)>,
+    pre_flags: &mut Vec<FlagEntry>,
     in_obj_phase: bool,
     warnings: &mut Vec<String>,
-) {
-    let apply_global = |g: &mut GlobalSettings, w: &mut Vec<String>| -> bool {
-        match set_global(g, name, value) {
-            Ok(()) => {
-                w.extend(g.take_warnings());
-                true
-            }
-            Err(e) => {
-                // The error message is only used as a fallback signal below.
-                let _ = e;
-                false
-            }
-        }
-    };
-
+) -> Result<(), String> {
     match target {
         Target::Global => {
-            // Always go to global settings.
-            if !apply_global(global, warnings) {
-                warnings.push(format!("global flag '--{name}' not recognised by global settings; ignored"));
+            match set_global(global, name, value) {
+                Ok(()) => {
+                    warnings.extend(global.take_warnings());
+                }
+                Err(e) => {
+                    return Err(format!("invalid value for --{cli_flag}: {e}"));
+                }
             }
         }
         Target::Both => {
             if !in_obj_phase {
-                // Leading phase: try global; fall back to pre_flags.
-                if !apply_global(global, warnings) {
-                    pre_flags.push((name.to_owned(), value.to_owned()));
+                // Leading phase: apply to global when the setting is known
+                // there; otherwise defer to per-object flags.
+                if get_global(global, name).is_some() {
+                    match set_global(global, name, value) {
+                        Ok(()) => {
+                            warnings.extend(global.take_warnings());
+                        }
+                        Err(e) => {
+                            return Err(format!("invalid value for --{cli_flag}: {e}"));
+                        }
+                    }
+                } else {
+                    pre_flags.push((cli_flag.to_owned(), name.to_owned(), value.to_owned()));
                 }
             } else {
                 // Object phase: queue for the next page.
-                pre_flags.push((name.to_owned(), value.to_owned()));
+                pre_flags.push((cli_flag.to_owned(), name.to_owned(), value.to_owned()));
             }
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -385,10 +400,10 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
     // captured into it are those that had accumulated since the *previous*
     // positional (or since the start, for the first one).  The final entry
     // always becomes the output; everything before it becomes a page object.
-    let mut pending_items: Vec<(Vec<(String, String)>, String)> = Vec::new();
+    let mut pending_items: Vec<(Vec<FlagEntry>, String)> = Vec::new();
 
     // Flags accumulated for the *next* positional encountered.
-    let mut pre_flags: Vec<(String, String)> = Vec::new();
+    let mut pre_flags: Vec<FlagEntry> = Vec::new();
 
     // True once the first page-input positional has been seen.  Determines
     // whether a flag call goes to global settings or into `pre_flags`.
@@ -433,6 +448,7 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
 
                 Action::Setting(name) => {
                     apply_setting(
+                        spec.long,
                         name,
                         val1,
                         spec.target,
@@ -440,11 +456,12 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
                         &mut pre_flags,
                         in_obj_phase,
                         &mut warnings,
-                    );
+                    )?;
                 }
 
                 Action::Const(name, value) => {
                     apply_setting(
+                        spec.long,
                         name,
                         value,
                         spec.target,
@@ -452,7 +469,7 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
                         &mut pre_flags,
                         in_obj_phase,
                         &mut warnings,
-                    );
+                    )?;
                 }
 
                 Action::TwoArg(name) => {
@@ -461,7 +478,7 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
                     // in the per-object context.  The registry will warn about
                     // them being unimplemented.
                     let combined = format!("{val1}={val2}");
-                    pre_flags.push((name.to_owned(), combined));
+                    pre_flags.push((spec.long.to_owned(), name.to_owned(), combined));
                 }
             }
 
@@ -514,10 +531,10 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
     for (flags, input_str) in pending_items {
         let input = parse_input(&input_str);
         let mut obj = PdfObjectSettings::default();
-        for (name, value) in flags {
+        for (cli_flag, name, value) in flags {
             match set_object(&mut obj, &name, &value) {
                 Ok(()) => {}
-                Err(e) => warnings.push(format!("{e}")),
+                Err(e) => return Err(format!("invalid value for --{cli_flag}: {e}")),
             }
         }
         warnings.extend(obj.take_warnings());
@@ -920,5 +937,45 @@ mod tests {
             "extended help header should say 'extended help'"
         );
         assert!(text.contains("--outline-depth"), "expected --outline-depth in extended help");
+    }
+
+    // ── Tests: bad flag values → parse Err (Fix 1) ───────────────────────
+    #[test]
+    fn bad_page_size_is_error() {
+        let err = parse(&args(&["--page-size", "Quux", "page.html", "out.pdf"])).unwrap_err();
+        assert!(
+            err.contains("invalid value for --page-size"),
+            "error should mention --page-size, got: {err}"
+        );
+    }
+
+    #[test]
+    fn bad_dpi_value_is_error() {
+        let err = parse(&args(&["--dpi", "abc", "page.html", "out.pdf"])).unwrap_err();
+        assert!(
+            err.contains("invalid value for --dpi"),
+            "error should mention --dpi, got: {err}"
+        );
+    }
+
+    #[test]
+    fn bad_zoom_value_is_error_leading_phase() {
+        let err = parse(&args(&["--zoom", "abc", "page.html", "out.pdf"])).unwrap_err();
+        assert!(
+            err.contains("invalid value for --zoom"),
+            "error should mention --zoom in leading phase, got: {err}"
+        );
+    }
+
+    #[test]
+    fn bad_zoom_value_is_error_object_phase() {
+        let err = parse(&args(&[
+            "page1.html", "--zoom", "abc", "page2.html", "out.pdf",
+        ]))
+        .unwrap_err();
+        assert!(
+            err.contains("invalid value for --zoom"),
+            "error should mention --zoom in object phase, got: {err}"
+        );
     }
 }

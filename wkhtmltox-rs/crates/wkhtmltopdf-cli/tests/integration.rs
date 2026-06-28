@@ -160,3 +160,35 @@ fn unknown_flag_exits_nonzero_fast() {
         out.status
     );
 }
+
+/// Bad flag value (--page-size with unknown size) → non-zero exit (Fix 1).
+#[test]
+fn bad_flag_value_exits_nonzero() {
+    let out = run_bin(&["--page-size", "Quux", "page.html", "out.pdf"]);
+    assert!(
+        !out.status.success(),
+        "bad flag value should cause non-zero exit; got {}",
+        out.status
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("invalid value for --page-size"),
+        "stderr should mention the flag name, got: {stderr:?}"
+    );
+}
+
+/// Missing input file → non-zero exit (Fix 2).
+#[test]
+fn missing_input_file_exits_nonzero() {
+    let out = run_bin(&["/nonexistent/path/absolutely-missing.html", "out.pdf"]);
+    assert!(
+        !out.status.success(),
+        "missing input should cause non-zero exit; got {}",
+        out.status
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not found"),
+        "stderr should mention 'not found', got: {stderr:?}"
+    );
+}
