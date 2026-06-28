@@ -380,6 +380,86 @@ extern "C" int wkx_pdf_stamp_footer(const char* in_path, const char* out_path,
     }
 }
 
+// Add clickable /Link annotations.
+//
+// For each i in 0..n: on page src_pages[i] append a /Link annot whose /Dest
+// array points at the page object for dest_pages[i].  The annotation carries
+// no visible border (/Border [0 0 0]) and uses /XYZ null null null so the
+// viewer preserves the reader's current zoom and position.
+//
+// All page indices are validated against the actual page count before any
+// mutation.  Returns 0 on success, 1 on QPDF/std error, 2 if n < 0,
+// 3 if any index is out of range.
+extern "C" int wkx_pdf_add_links(const char* in_path, const char* out_path,
+                                  const int* src_pages, const double* rects,
+                                  const int* dest_pages, int n) {
+    try {
+        if (n < 0) return 2;
+
+        QPDF q;
+        q.processFile(in_path);
+
+        QPDFPageDocumentHelper pdh(q);
+        auto pages = pdh.getAllPages();
+        int page_count = (int)pages.size();
+
+        // Validate every index upfront — fail fast, no partial mutations.
+        for (int i = 0; i < n; ++i) {
+            if (src_pages[i]  < 0 || src_pages[i]  >= page_count) return 3;
+            if (dest_pages[i] < 0 || dest_pages[i] >= page_count) return 3;
+        }
+
+        for (int i = 0; i < n; ++i) {
+            QPDFObjectHandle src_page  = pages[src_pages[i]].getObjectHandle();
+            QPDFObjectHandle dest_page = pages[dest_pages[i]].getObjectHandle();
+
+            // /Rect [x0 y0 x1 y1] in PDF user-space points (bottom-left origin).
+            QPDFObjectHandle rect = QPDFObjectHandle::newArray();
+            rect.appendItem(QPDFObjectHandle::newReal(rects[i * 4 + 0]));
+            rect.appendItem(QPDFObjectHandle::newReal(rects[i * 4 + 1]));
+            rect.appendItem(QPDFObjectHandle::newReal(rects[i * 4 + 2]));
+            rect.appendItem(QPDFObjectHandle::newReal(rects[i * 4 + 3]));
+
+            // /Border [0 0 0] — no visible border line.
+            QPDFObjectHandle border = QPDFObjectHandle::newArray();
+            border.appendItem(QPDFObjectHandle::newInteger(0));
+            border.appendItem(QPDFObjectHandle::newInteger(0));
+            border.appendItem(QPDFObjectHandle::newInteger(0));
+
+            // /Dest [dest_page_obj /XYZ null null null] — GoTo destination.
+            // /XYZ with null args preserves the viewer's current position & zoom.
+            QPDFObjectHandle dest = QPDFObjectHandle::newArray();
+            dest.appendItem(dest_page);
+            dest.appendItem(QPDFObjectHandle::newName("/XYZ"));
+            dest.appendItem(QPDFObjectHandle::newNull());
+            dest.appendItem(QPDFObjectHandle::newNull());
+            dest.appendItem(QPDFObjectHandle::newNull());
+
+            // Build the annotation as an indirect object so it can be referenced.
+            QPDFObjectHandle annot = q.makeIndirectObject(QPDFObjectHandle::newDictionary());
+            annot.replaceKey("/Type",    QPDFObjectHandle::newName("/Annot"));
+            annot.replaceKey("/Subtype", QPDFObjectHandle::newName("/Link"));
+            annot.replaceKey("/Rect",    rect);
+            annot.replaceKey("/Border",  border);
+            annot.replaceKey("/Dest",    dest);
+
+            // Append to the page's /Annots array, creating it if absent.
+            if (!src_page.hasKey("/Annots")) {
+                src_page.replaceKey("/Annots", QPDFObjectHandle::newArray());
+            }
+            src_page.getKey("/Annots").appendItem(annot);
+        }
+
+        QPDFWriter w(q, out_path);
+        w.write();
+        return 0;
+    } catch (const std::exception&) {
+        return 1;
+    } catch (...) {
+        return 2; // unknown exception must not unwind across extern "C"
+    }
+}
+
 // Return the number of pages in `in_path`, or -1 on error.
 extern "C" int wkx_pdf_page_count(const char* in_path) {
     try {

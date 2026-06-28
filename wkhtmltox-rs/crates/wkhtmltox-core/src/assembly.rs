@@ -117,6 +117,9 @@ pub fn assemble_pdf(
 
     // ── TOC path ──────────────────────────────────────────────────────────────
     if opts.with_toc {
+        // NOTE(T5): internal link annotation synthesis is not yet wired into the
+        // TOC path.  The named-dest extraction and coordinate mapping work
+        // correctly for the non-TOC path; the TOC path is deferred to T6/M2c.
         return assemble_with_toc(
             r,
             objects,
@@ -134,6 +137,18 @@ pub fn assemble_pdf(
     // Content page offset: begins after the cover (0 if no cover).
     let mut content_offset: u32 = 0;
     let mut content_parts: Vec<PathBuf> = Vec::with_capacity(objects.len());
+
+    // Accumulated /Link annotation specs: (src_page_global, rect_pt, dest_page_global).
+    // Populated from probe `links` + named-dest extraction; see coordinate note below.
+    let mut link_annots: Vec<wkhtmltox_pdf_sys::LinkSpec> = Vec::new();
+
+    // APPROXIMATE: page height in PDF points estimated from `geom`, not the actual
+    // rendered MediaBox.  Accurate when the renderer uses the given geometry (the
+    // common case).  CSS px → PDF pt = ×0.75 (96 → 72 dpi).  PDF y is bottom-up.
+    // Source-page determination (`top / page_height_px`) is a further approximation
+    // validated loosely in T6.
+    let page_height_pt = geom.height_mm * 72.0 / 25.4;
+    let page_height_px = page_height_pt / 0.75; // CSS 96 dpi → PDF 72 dpi
 
     for (i, src) in objects.iter().enumerate() {
         let p = r.open(src, &LoadSettings::default())?;
@@ -159,6 +174,46 @@ pub fn assemble_pdf(
             for h in outline::parse_probe(&probe) {
                 outline_items.push((h.text, cover_pages + content_offset, h.level));
             }
+        }
+
+        // ── Synthesise internal /Link annotations (mitigates Chromium bug 347674894).
+        //
+        // Extract named destinations from the part PDF (before merging, while obj IDs
+        // are still original).  Then for each internal probe link whose anchor appears
+        // in the named-dest map, compute global page indices and approximate PDF-space
+        // coordinates, accumulating into `link_annots`.
+        let named_dests = crate::pdfread::extract_named_dests(&part);
+        for link in crate::outline::parse_probe_links(&probe) {
+            if !link.internal {
+                continue;
+            }
+            let anchor = link.href.trim_start_matches('#');
+            let local_dest_page = match named_dests.get(anchor) {
+                Some(&p) => p,
+                None => continue, // anchor not found in this object's named dests
+            };
+            let global_dest_page = cover_pages + content_offset + local_dest_page;
+
+            // APPROXIMATE: derive which page the link element sits on from its
+            // document-absolute CSS top coordinate.
+            let local_src_page = (link.top / page_height_px).floor() as u32;
+            if local_src_page >= n {
+                continue; // top coordinate exceeds this object's page count
+            }
+            let global_src_page = cover_pages + content_offset + local_src_page;
+
+            // APPROXIMATE: convert bounding rect from CSS px (top-down, document-abs)
+            // to PDF user-space points (bottom-up, page-relative).
+            let page_y_offset_px = local_src_page as f64 * page_height_px;
+            let x0 = link.rect[0] * 0.75;
+            let x1 = link.rect[2] * 0.75;
+            let css_y_top = (link.rect[1] - page_y_offset_px) * 0.75;
+            let css_y_bot = (link.rect[3] - page_y_offset_px) * 0.75;
+            // PDF rect: [x_left, y_bottom, x_right, y_top] with y from page bottom.
+            let pdf_y0 = (page_height_pt - css_y_bot).max(0.0);
+            let pdf_y1 = (page_height_pt - css_y_top).max(0.0);
+
+            link_annots.push((global_src_page, [x0, pdf_y0, x1, pdf_y1], global_dest_page));
         }
 
         content_offset += n;
@@ -223,8 +278,28 @@ pub fn assemble_pdf(
         before_cells
     };
 
+    // ── Synthesise clickable /Link annotations (mitigates Chromium bug 347674894).
+    //
+    // Called as the final step so it operates on the fully-assembled PDF
+    // (merged + outline + optional cells).  When there are no internal links
+    // the step is skipped entirely.
+    //
+    // Coordinate accuracy note: src_page and rect are APPROXIMATE (96→72 dpi
+    // scaling, geom-derived page height, top-down → bottom-up y flip).
+    // Dest-page resolution (named-dest map) is exact.  Full validation deferred
+    // to T6 oracle comparison.
+    let pre_link = final_path;
+    let copy_src = if !link_annots.is_empty() {
+        let linked = work.path().join("linked.pdf");
+        wkhtmltox_pdf_sys::add_links(&pre_link, &linked, &link_annots)
+            .map_err(WkError::Pdf)?;
+        linked
+    } else {
+        pre_link
+    };
+
     // Copy result to the caller-supplied destination before `work` is dropped.
-    std::fs::copy(&final_path, out).map_err(|e| WkError::Io(e.to_string()))?;
+    std::fs::copy(&copy_src, out).map_err(|e| WkError::Io(e.to_string()))?;
 
     // `work` drops here → TempDir removes the directory unconditionally.
     Ok(AssemblyReport {

@@ -26,6 +26,14 @@ extern "C" {
         start: c_int,
     ) -> c_int;
     fn wkx_pdf_page_count(in_path: *const c_char) -> c_int;
+    fn wkx_pdf_add_links(
+        in_path: *const c_char,
+        out_path: *const c_char,
+        src_pages: *const c_int,
+        rects: *const f64,
+        dest_pages: *const c_int,
+        n: c_int,
+    ) -> c_int;
     fn wkx_pdf_stamp_cells(
         in_path: *const c_char,
         out_path: *const c_char,
@@ -153,6 +161,48 @@ pub fn stamp_cells(
         Ok(())
     } else {
         Err(format!("wkx_pdf_stamp_cells rc={rc}"))
+    }
+}
+
+/// A single clickable link annotation: `(src_page, rect, dest_page)`.
+///
+/// - `src_page` — 0-based index of the page that carries the clickable area.
+/// - `rect` — `[x0, y0, x1, y1]` in PDF user-space points, origin at the
+///   **bottom-left** of the page (the standard PDF coordinate system).
+/// - `dest_page` — 0-based index of the page the link navigates to.
+pub type LinkSpec = (u32, [f64; 4], u32);
+
+/// Safe wrapper: add clickable `/Link` annotations to a copy of `in_path`.
+///
+/// For each `(src_page, rect, dest_page)` in `links`, a `/Type /Annot /Subtype /Link`
+/// annotation is appended to page `src_page`'s `/Annots` array.  The `/Dest` is a
+/// `/XYZ null null null` GoTo destination pointing at `dest_page`, which preserves
+/// the viewer's current zoom and position.
+///
+/// Returns `Err` if any page index is out of range, if a QPDF error occurs, or if a
+/// path contains interior NUL bytes.
+pub fn add_links(in_path: &Path, out_path: &Path, links: &[LinkSpec]) -> Result<(), String> {
+    let ci = CString::new(in_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let co = CString::new(out_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+
+    let src_pages_c: Vec<c_int> = links.iter().map(|(s, _, _)| *s as c_int).collect();
+    let dest_pages_c: Vec<c_int> = links.iter().map(|(_, _, d)| *d as c_int).collect();
+    let rects_c: Vec<f64> = links.iter().flat_map(|(_, r, _)| r.iter().copied()).collect();
+
+    let rc = unsafe {
+        wkx_pdf_add_links(
+            ci.as_ptr(),
+            co.as_ptr(),
+            src_pages_c.as_ptr(),
+            rects_c.as_ptr(),
+            dest_pages_c.as_ptr(),
+            links.len() as c_int,
+        )
+    };
+    match rc {
+        0 => Ok(()),
+        3 => Err("wkx_pdf_add_links: page index out of range".into()),
+        r => Err(format!("wkx_pdf_add_links rc={r}")),
     }
 }
 

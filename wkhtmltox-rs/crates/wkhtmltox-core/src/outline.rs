@@ -1,7 +1,17 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
 
 /// JS injected via `Renderer::eval_json` to extract document structure as JSON.
-/// `page` is filled later from engine destinations; here it defaults to 0.
+///
+/// Returns `{ headings, links }` where:
+/// - `headings`: H1–H6 elements with level, text, anchor, page (page always 0 here).
+/// - `links`: internal `<a href="#…">` elements with href, internal flag, the
+///   document-absolute top Y in CSS px, and a bounding rect `[x0, y0, x1, y1]`
+///   also in document-absolute CSS px.
+///
+/// **Coordinate note:** `getBoundingClientRect()` is viewport-relative; in print
+/// mode `window.scrollY` is 0, so the coordinates approximate the page-relative
+/// position.  The mapping from CSS px to PDF user-space points is approximate
+/// (96→72 dpi, bottom-up y flip) and is documented as such in `assembly.rs`.
 pub const PROBE_JS: &str = r#"(() => {
   const hs = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(h => ({
     level: Number(h.tagName.substring(1)),
@@ -9,7 +19,19 @@ pub const PROBE_JS: &str = r#"(() => {
     anchor: h.id || null,
     page: 0
   }));
-  return { headings: hs };
+  const sy = (typeof window !== 'undefined' && window.scrollY) || 0;
+  const ls = [...document.querySelectorAll('a[href]')]
+    .filter(a => { const h = a.getAttribute('href') || ''; return h.startsWith('#'); })
+    .map(a => {
+      const r = a.getBoundingClientRect();
+      return {
+        href: a.getAttribute('href'),
+        internal: true,
+        top: r.top + sy,
+        rect: [r.left, r.top + sy, r.right, r.bottom + sy]
+      };
+    });
+  return { headings: hs, links: ls };
 })()"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +67,52 @@ pub fn parse_probe(v: &serde_json::Value) -> Vec<Heading> {
                             .and_then(|p| p.as_u64())
                             .unwrap_or(0) as u32,
                     })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A single internal `<a href="#…">` link extracted from the probe JSON.
+#[derive(Debug, Clone)]
+pub struct ProbeLink {
+    /// The raw `href` attribute value, e.g. `"#section-1"`.
+    pub href: String,
+    /// Always `true` for links collected by the probe (href starts with `#`).
+    pub internal: bool,
+    /// Document-absolute top of the link element in CSS px (approx. in print mode).
+    pub top: f64,
+    /// `[x0, y0, x1, y1]` bounding rect in document-absolute CSS px.
+    pub rect: [f64; 4],
+}
+
+/// Parse the `links` array from a probe JSON value.
+///
+/// Returns an empty `Vec` if the field is missing or malformed.
+/// Malformed individual entries are silently skipped.
+pub fn parse_probe_links(v: &serde_json::Value) -> Vec<ProbeLink> {
+    v.get("links")
+        .and_then(|l| l.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let href = item.get("href")?.as_str()?.to_string();
+                    let internal = item
+                        .get("internal")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or_else(|| href.starts_with('#'));
+                    let top = item.get("top")?.as_f64()?;
+                    let rect_arr = item.get("rect")?.as_array()?;
+                    if rect_arr.len() < 4 {
+                        return None;
+                    }
+                    let rect = [
+                        rect_arr[0].as_f64()?,
+                        rect_arr[1].as_f64()?,
+                        rect_arr[2].as_f64()?,
+                        rect_arr[3].as_f64()?,
+                    ];
+                    Some(ProbeLink { href, internal, top, rect })
                 })
                 .collect()
         })
@@ -103,5 +171,28 @@ mod tests {
     #[test]
     fn probe_js_is_present() {
         assert!(PROBE_JS.contains("headings"));
+        assert!(PROBE_JS.contains("links"), "PROBE_JS must also collect links");
+    }
+
+    #[test]
+    fn parse_probe_links_extracts_internal_link() {
+        let v = serde_json::json!({
+            "headings": [],
+            "links": [
+                {"href": "#x", "internal": true, "top": 100.0, "rect": [10.0, 100.0, 200.0, 120.0]}
+            ]
+        });
+        let links = parse_probe_links(&v);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].href, "#x");
+        assert!(links[0].internal);
+        assert_eq!(links[0].top, 100.0);
+        assert_eq!(links[0].rect, [10.0, 100.0, 200.0, 120.0]);
+    }
+
+    #[test]
+    fn parse_probe_links_empty_when_no_links_field() {
+        let v = serde_json::json!({ "headings": [] });
+        assert!(parse_probe_links(&v).is_empty());
     }
 }
