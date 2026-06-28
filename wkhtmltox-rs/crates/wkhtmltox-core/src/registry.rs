@@ -16,7 +16,7 @@
 use crate::error::{Result, WkError};
 use crate::render::Orientation;
 use crate::settings::{parse_bool, parse_length_mm, ColorMode, GlobalSettings,
-                      NamedPageSize, PdfObjectSettings};
+                      ImageGlobalSettings, NamedPageSize, PdfObjectSettings};
 
 // ---------------------------------------------------------------------------
 // Global settings
@@ -544,6 +544,233 @@ pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
     Some(v)
 }
 
+// ---------------------------------------------------------------------------
+// Image global settings
+// ---------------------------------------------------------------------------
+
+/// Set an `ImageGlobalSettings` field by its upstream dotted name.
+///
+/// The naming follows the upstream wkhtmltoimage reflection system
+/// (`imagesettings.cc` / `imagecommandlineparser.cc`).  The names
+/// `"loadPage.*"` and `"load.*"` are both accepted as aliases for the
+/// load/web settings, matching how wkhtmltopdf treats these names.
+///
+/// # Errors
+/// Returns `Err(WkError::BadArg)` for an unknown name or an unparseable value.
+pub fn set_image_global(g: &mut ImageGlobalSettings, name: &str, value: &str) -> Result<()> {
+    match name {
+        // ── input / output ────────────────────────────────────────────────
+        "in" => {
+            g.in_path = if value.is_empty() { None } else { Some(value.to_string()) };
+        }
+        "out" => {
+            g.out = if value.is_empty() { None } else { Some(value.to_string()) };
+        }
+        "fmt" => {
+            g.fmt = value.to_ascii_lowercase();
+        }
+        "quality" => {
+            g.quality = value.trim().parse::<u8>()
+                .map_err(|_| WkError::BadArg(format!("invalid quality: {value:?}")))?;
+        }
+
+        // ── viewport / layout ─────────────────────────────────────────────
+        "screenWidth" => {
+            g.screen_width = Some(
+                value.trim().parse::<u32>()
+                    .map_err(|_| WkError::BadArg(format!("invalid screenWidth: {value:?}")))?,
+            );
+        }
+        "screenHeight" => {
+            g.screen_height = Some(
+                value.trim().parse::<u32>()
+                    .map_err(|_| WkError::BadArg(format!("invalid screenHeight: {value:?}")))?,
+            );
+        }
+        "smartWidth" => {
+            g.smart_width = parse_bool(value)?;
+        }
+        "zoom" | "load.zoomFactor" | "loadPage.zoomFactor" => {
+            g.zoom = value.trim().parse::<f64>()
+                .map_err(|_| WkError::BadArg(format!("invalid zoom: {value:?}")))?;
+        }
+
+        // ── crop ──────────────────────────────────────────────────────────
+        "crop.left" => {
+            g.crop_x = Some(
+                value.trim().parse::<u32>()
+                    .map_err(|_| WkError::BadArg(format!("invalid crop.left: {value:?}")))?,
+            );
+        }
+        "crop.top" => {
+            g.crop_y = Some(
+                value.trim().parse::<u32>()
+                    .map_err(|_| WkError::BadArg(format!("invalid crop.top: {value:?}")))?,
+            );
+        }
+        "crop.width" => {
+            g.crop_w = Some(
+                value.trim().parse::<u32>()
+                    .map_err(|_| WkError::BadArg(format!("invalid crop.width: {value:?}")))?,
+            );
+        }
+        "crop.height" => {
+            g.crop_h = Some(
+                value.trim().parse::<u32>()
+                    .map_err(|_| WkError::BadArg(format!("invalid crop.height: {value:?}")))?,
+            );
+        }
+
+        // ── transparency ──────────────────────────────────────────────────
+        "transparent" => {
+            g.transparent = parse_bool(value)?;
+        }
+
+        // ── web rendering ─────────────────────────────────────────────────
+        "web.enableJavascript" => g.enable_javascript = parse_bool(value)?,
+        "web.printMediaType" => g.print_media_type = parse_bool(value)?,
+        "web.background" => g.print_background = parse_bool(value)?,
+
+        // ── load (canonical + loadPage.* aliases) ─────────────────────────
+        "load.jsdelay" | "loadPage.jsdelay" => {
+            g.javascript_delay_ms = value.trim().parse::<u64>()
+                .map_err(|_| WkError::BadArg(format!("invalid jsdelay: {value:?}")))?;
+        }
+        "load.proxy" | "loadPage.proxy" => {
+            g.proxy = if value.is_empty() { None } else { Some(value.to_string()) };
+        }
+        "load.blockLocalFileAccess" | "loadPage.blockLocalFileAccess" => {
+            g.allow_local_file_access = !parse_bool(value)?;
+        }
+        "load.username" | "loadPage.username" => g.username = value.to_string(),
+        "load.password" | "loadPage.password" => g.password = value.to_string(),
+        "load.noCheckCertificate" => g.no_check_certificate = parse_bool(value)?,
+
+        // ── security policy ───────────────────────────────────────────────
+        "load.safe" => g.safe_mode = parse_bool(value)?,
+        "load.allowedPath" => {
+            if !value.is_empty() {
+                g.allowed_paths.push(value.to_string());
+            }
+        }
+        "load.disableExternalLinks" => g.block_external_links = parse_bool(value)?,
+        "load.disableInternalLinks" => g.block_internal_links = parse_bool(value)?,
+
+        // ── recognised-but-unimplemented ──────────────────────────────────
+        "logLevel"
+        | "quiet"
+        | "useGraphics"
+        | "loadGlobal.cookieJar"
+        | "load.cookieJar"
+        | "web.loadImages"
+        | "web.enableIntelligentShrinking"
+        | "web.minimumFontSize"
+        | "web.defaultEncoding"
+        | "web.userStyleSheet"
+        | "web.enablePlugins"
+        | "loadPage.windowStatus"
+        | "loadPage.stopSlowScripts"
+        | "loadPage.debugJavascript"
+        | "loadPage.loadErrorHandling"
+        | "loadPage.runScript"
+        | "loadPage.cacheDir"
+        | "loadPage.clientSslKeyPath"
+        | "loadPage.clientSslKeyPassword"
+        | "loadPage.clientSslCrtPath"
+        | "loadPage.repeatCustomHeaders"
+        | "loadPage.cookieJar" => {
+            g.warnings.push(format!(
+                "setting {name:?} is recognised but not yet implemented in this engine; ignored"
+            ));
+        }
+
+        // ── unknown ───────────────────────────────────────────────────────
+        _ => {
+            return Err(WkError::BadArg(format!("unknown image setting: {name:?}")));
+        }
+    }
+    Ok(())
+}
+
+/// Return the current string representation of an image-settings field.
+///
+/// Returns `Some(value_string)` for a known name (even recognised-but-
+/// unimplemented — those return an empty string).  Returns `None` for unknown
+/// names.
+pub fn get_image_global(g: &ImageGlobalSettings, name: &str) -> Option<String> {
+    let v: String = match name {
+        // ── input / output ────────────────────────────────────────────────
+        "in"  => g.in_path.clone().unwrap_or_default(),
+        "out" => g.out.clone().unwrap_or_default(),
+        "fmt" => g.fmt.clone(),
+        "quality" => g.quality.to_string(),
+
+        // ── viewport / layout ─────────────────────────────────────────────
+        "screenWidth" => g.screen_width.map(|v| v.to_string()).unwrap_or_default(),
+        "screenHeight" => g.screen_height.map(|v| v.to_string()).unwrap_or_default(),
+        "smartWidth" => g.smart_width.to_string(),
+        "zoom" | "load.zoomFactor" | "loadPage.zoomFactor" => g.zoom.to_string(),
+
+        // ── crop ──────────────────────────────────────────────────────────
+        "crop.left"   => g.crop_x.map(|v| v.to_string()).unwrap_or_default(),
+        "crop.top"    => g.crop_y.map(|v| v.to_string()).unwrap_or_default(),
+        "crop.width"  => g.crop_w.map(|v| v.to_string()).unwrap_or_default(),
+        "crop.height" => g.crop_h.map(|v| v.to_string()).unwrap_or_default(),
+
+        // ── transparency ──────────────────────────────────────────────────
+        "transparent" => g.transparent.to_string(),
+
+        // ── web rendering ─────────────────────────────────────────────────
+        "web.enableJavascript" => g.enable_javascript.to_string(),
+        "web.printMediaType"   => g.print_media_type.to_string(),
+        "web.background"       => g.print_background.to_string(),
+
+        // ── load ──────────────────────────────────────────────────────────
+        "load.jsdelay" | "loadPage.jsdelay" => g.javascript_delay_ms.to_string(),
+        "load.proxy"   | "loadPage.proxy"   => g.proxy.clone().unwrap_or_default(),
+        "load.blockLocalFileAccess" | "loadPage.blockLocalFileAccess" => {
+            (!g.allow_local_file_access).to_string()
+        }
+        "load.username" | "loadPage.username" => g.username.clone(),
+        "load.password" | "loadPage.password" => g.password.clone(),
+        "load.noCheckCertificate" => g.no_check_certificate.to_string(),
+
+        // ── security policy ───────────────────────────────────────────────
+        "load.safe"                  => g.safe_mode.to_string(),
+        "load.allowedPath"           => g.allowed_paths.join(","),
+        "load.disableExternalLinks"  => g.block_external_links.to_string(),
+        "load.disableInternalLinks"  => g.block_internal_links.to_string(),
+
+        // ── recognised-but-unimplemented → empty default ──────────────────
+        "logLevel"
+        | "quiet"
+        | "useGraphics"
+        | "loadGlobal.cookieJar"
+        | "load.cookieJar"
+        | "web.loadImages"
+        | "web.enableIntelligentShrinking"
+        | "web.minimumFontSize"
+        | "web.defaultEncoding"
+        | "web.userStyleSheet"
+        | "web.enablePlugins"
+        | "loadPage.windowStatus"
+        | "loadPage.stopSlowScripts"
+        | "loadPage.debugJavascript"
+        | "loadPage.loadErrorHandling"
+        | "loadPage.runScript"
+        | "loadPage.cacheDir"
+        | "loadPage.clientSslKeyPath"
+        | "loadPage.clientSslKeyPassword"
+        | "loadPage.clientSslCrtPath"
+        | "loadPage.repeatCustomHeaders"
+        | "loadPage.cookieJar" => String::new(),
+
+        // ── unknown ───────────────────────────────────────────────────────
+        _ => return None,
+    };
+    Some(v)
+}
+
 /// Map a `NamedPageSize` to its canonical wkhtmltopdf string representation.
 fn named_page_size_as_str(ps: NamedPageSize) -> &'static str {
     match ps {
@@ -833,5 +1060,125 @@ mod tests {
 
         set_global(&mut g, "margin.right", "96px").unwrap();
         assert!((g.margin_right_mm - 25.4).abs() < 1e-9);
+    }
+
+    // -----------------------------------------------------------------------
+    // Image global settings tests
+    // -----------------------------------------------------------------------
+
+    /// Round-trip for set_image_global / get_image_global.
+    #[test]
+    fn image_global_round_trip() {
+        let mut g = ImageGlobalSettings::default();
+        set_image_global(&mut g, "fmt", "jpeg").unwrap();
+        set_image_global(&mut g, "quality", "80").unwrap();
+        set_image_global(&mut g, "screenWidth", "1920").unwrap();
+        set_image_global(&mut g, "transparent", "true").unwrap();
+        set_image_global(&mut g, "crop.left", "10").unwrap();
+        set_image_global(&mut g, "crop.top", "20").unwrap();
+        set_image_global(&mut g, "crop.width", "800").unwrap();
+        set_image_global(&mut g, "crop.height", "600").unwrap();
+        set_image_global(&mut g, "zoom", "1.5").unwrap();
+        set_image_global(&mut g, "load.jsdelay", "500").unwrap();
+        set_image_global(&mut g, "web.enableJavascript", "false").unwrap();
+
+        assert_eq!(g.fmt, "jpeg");
+        assert_eq!(g.quality, 80);
+        assert_eq!(g.screen_width, Some(1920));
+        assert!(g.transparent);
+        assert_eq!(g.crop_x, Some(10));
+        assert_eq!(g.crop_y, Some(20));
+        assert_eq!(g.crop_w, Some(800));
+        assert_eq!(g.crop_h, Some(600));
+        assert!((g.zoom - 1.5).abs() < 1e-9);
+        assert_eq!(g.javascript_delay_ms, 500);
+        assert!(!g.enable_javascript);
+        assert!(g.warnings.is_empty());
+
+        // Verify get_image_global round-trips.
+        assert_eq!(get_image_global(&g, "fmt"), Some("jpeg".to_owned()));
+        assert_eq!(get_image_global(&g, "quality"), Some("80".to_owned()));
+        assert_eq!(get_image_global(&g, "crop.left"), Some("10".to_owned()));
+        assert_eq!(get_image_global(&g, "transparent"), Some("true".to_owned()));
+    }
+
+    /// set_image_global("in", ...) stores in_path.
+    #[test]
+    fn image_global_in_setting() {
+        let mut g = ImageGlobalSettings::default();
+        set_image_global(&mut g, "in", "https://example.com").unwrap();
+        assert_eq!(g.in_path, Some("https://example.com".to_owned()));
+        assert_eq!(get_image_global(&g, "in"), Some("https://example.com".to_owned()));
+
+        set_image_global(&mut g, "in", "").unwrap(); // clear
+        assert_eq!(g.in_path, None);
+    }
+
+    /// Unknown image setting name → Err.
+    #[test]
+    fn image_global_unknown_name_errors() {
+        let mut g = ImageGlobalSettings::default();
+        let err = set_image_global(&mut g, "totally.unknown.xyz", "v").unwrap_err();
+        assert!(matches!(err, WkError::BadArg(_)));
+    }
+
+    /// Recognised-but-unimplemented image setting → Ok + warning.
+    #[test]
+    fn image_global_unimplemented_warns() {
+        let mut g = ImageGlobalSettings::default();
+        set_image_global(&mut g, "logLevel", "info").unwrap();
+        assert!(!g.warnings.is_empty());
+        assert!(g.warnings[0].contains("logLevel"));
+    }
+
+    /// Unknown image setting get → None.
+    #[test]
+    fn image_global_unknown_get_returns_none() {
+        let g = ImageGlobalSettings::default();
+        assert_eq!(get_image_global(&g, "no.such.thing"), None);
+    }
+
+    /// to_image_opts maps fields correctly.
+    #[test]
+    fn image_global_to_image_opts() {
+        let mut g = ImageGlobalSettings::default();
+        set_image_global(&mut g, "fmt", "jpeg").unwrap();
+        set_image_global(&mut g, "quality", "75").unwrap();
+        set_image_global(&mut g, "transparent", "false").unwrap();
+        set_image_global(&mut g, "crop.left", "5").unwrap();
+        set_image_global(&mut g, "crop.top", "10").unwrap();
+        set_image_global(&mut g, "crop.width", "100").unwrap();
+        set_image_global(&mut g, "crop.height", "200").unwrap();
+
+        let opts = g.to_image_opts();
+        assert!(matches!(opts.format, crate::render::ImageFormat::Jpeg));
+        assert_eq!(opts.quality, 75);
+        assert!(!opts.transparent);
+        assert_eq!(opts.crop, Some((5, 10, 100, 200)));
+    }
+
+    /// Partial crop (missing fields) → no crop applied.
+    #[test]
+    fn image_global_partial_crop_no_crop() {
+        let mut g = ImageGlobalSettings::default();
+        set_image_global(&mut g, "crop.left", "5").unwrap();
+        set_image_global(&mut g, "crop.top", "10").unwrap();
+        // crop.width and crop.height not set
+
+        let opts = g.to_image_opts();
+        assert_eq!(opts.crop, None, "partial crop should result in no crop");
+    }
+
+    /// loadPage.* aliases work the same as load.*.
+    #[test]
+    fn image_global_loadpage_aliases() {
+        let mut g = ImageGlobalSettings::default();
+        set_image_global(&mut g, "loadPage.jsdelay", "300").unwrap();
+        set_image_global(&mut g, "loadPage.username", "alice").unwrap();
+        set_image_global(&mut g, "loadPage.zoomFactor", "2.0").unwrap();
+
+        assert_eq!(g.javascript_delay_ms, 300);
+        assert_eq!(g.username, "alice");
+        assert!((g.zoom - 2.0).abs() < 1e-9);
     }
 }

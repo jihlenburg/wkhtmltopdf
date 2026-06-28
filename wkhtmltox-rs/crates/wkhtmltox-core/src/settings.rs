@@ -496,6 +496,191 @@ impl PdfObjectSettings {
 }
 
 // ---------------------------------------------------------------------------
+// ImageGlobalSettings
+// ---------------------------------------------------------------------------
+/// Settings for the wkhtmltoimage converter, matching upstream `ImageGlobal`.
+///
+/// Naming convention for the C-ABI registry mirrors the upstream reflection
+/// system (`imagesettings.cc`) and is documented on each field.
+#[derive(Debug, Clone)]
+pub struct ImageGlobalSettings {
+    // --- Input / Output ---------------------------------------------------
+    /// Input URL or file path (`"in"` setting).  `None` = not set.
+    pub in_path: Option<String>,
+    /// Output file path (`"out"` setting).  `None` = stdout.
+    pub out: Option<String>,
+
+    // --- Format -----------------------------------------------------------
+    /// Output format: `"png"`, `"jpeg"`, or `"jpg"` (`"fmt"` setting).
+    pub fmt: String,
+    /// JPEG quality 0–100 (`"quality"` setting).  Ignored for PNG.
+    pub quality: u8,
+
+    // --- Viewport / layout ------------------------------------------------
+    /// Screen width in pixels for the Chromium viewport (`"screenWidth"`).
+    pub screen_width: Option<u32>,
+    /// Hint for page height in pixels (`"screenHeight"`).  Informational only.
+    pub screen_height: Option<u32>,
+    /// When `true` (default), allow the viewport to be wider than
+    /// `screen_width` to prevent breaking content (`"smartWidth"`).
+    pub smart_width: bool,
+    /// Zoom / scale factor (`"zoom"` or `"load.zoomFactor"`).
+    pub zoom: f64,
+
+    // --- Crop -------------------------------------------------------------
+    /// Pixel crop X offset (`"crop.left"`).
+    pub crop_x: Option<u32>,
+    /// Pixel crop Y offset (`"crop.top"`).
+    pub crop_y: Option<u32>,
+    /// Pixel crop width (`"crop.width"`).
+    pub crop_w: Option<u32>,
+    /// Pixel crop height (`"crop.height"`).
+    pub crop_h: Option<u32>,
+
+    // --- PNG transparency -------------------------------------------------
+    /// Keep alpha channel in PNG output (`"transparent"`).
+    pub transparent: bool,
+
+    // --- Web rendering ---------------------------------------------------
+    pub enable_javascript: bool,    // "web.enableJavascript"
+    pub print_media_type: bool,     // "web.printMediaType"
+    pub print_background: bool,     // "web.background"
+
+    // --- Load settings ---------------------------------------------------
+    /// JavaScript delay in milliseconds (`"load.jsdelay"`).
+    pub javascript_delay_ms: u64,
+    /// HTTP/SOCKS proxy URL (`"load.proxy"`).
+    pub proxy: Option<String>,
+    /// Ignore TLS certificate errors (`"load.noCheckCertificate"`).
+    pub no_check_certificate: bool,
+    /// Allow `file://` URLs (`"load.blockLocalFileAccess"` inverted).
+    pub allow_local_file_access: bool,
+    /// HTTP Basic-auth username (`"load.username"`).
+    pub username: String,
+    /// HTTP Basic-auth password (`"load.password"`).
+    pub password: String,
+    /// Cookies to inject (`"load.cookies"`).
+    pub cookies: Vec<(String, String)>,
+    /// Extra HTTP request headers (`"load.customHeaders"`).
+    pub custom_headers: Vec<(String, String)>,
+
+    // --- Security policy -------------------------------------------------
+    /// Activate the hardened `--safe` profile (`"load.safe"`).
+    pub safe_mode: bool,
+    /// Paths always permitted even in safe mode (`"load.allowedPath"`).
+    pub allowed_paths: Vec<String>,
+    /// Block external `<a>` links (`"load.disableExternalLinks"`).
+    pub block_external_links: bool,
+    /// Block same-page `#anchor` links (`"load.disableInternalLinks"`).
+    pub block_internal_links: bool,
+
+    // --- Internal --------------------------------------------------------
+    /// Warnings accumulated for recognised-but-unimplemented settings.
+    pub warnings: Vec<String>,
+}
+
+impl Default for ImageGlobalSettings {
+    fn default() -> Self {
+        Self {
+            in_path: None,
+            out: None,
+            fmt: String::from("png"),
+            quality: 94,
+            screen_width: Some(1024),
+            screen_height: None,
+            smart_width: true,
+            zoom: 1.0,
+            crop_x: None,
+            crop_y: None,
+            crop_w: None,
+            crop_h: None,
+            transparent: false,
+            enable_javascript: true,
+            print_media_type: false,
+            print_background: true,
+            javascript_delay_ms: 200,
+            proxy: None,
+            no_check_certificate: false,
+            allow_local_file_access: true,
+            username: String::new(),
+            password: String::new(),
+            cookies: Vec::new(),
+            custom_headers: Vec::new(),
+            safe_mode: false,
+            allowed_paths: Vec::new(),
+            block_external_links: false,
+            block_internal_links: false,
+            warnings: Vec::new(),
+        }
+    }
+}
+
+impl ImageGlobalSettings {
+    /// Drain and return any accumulated warnings, clearing the internal list.
+    pub fn take_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.warnings)
+    }
+
+    /// Map the format/quality/crop/transparency fields to an [`crate::image::ImageOpts`].
+    pub fn to_image_opts(&self) -> crate::image::ImageOpts {
+        use crate::render::ImageFormat;
+        let format = match self.fmt.to_ascii_lowercase().as_str() {
+            "jpeg" | "jpg" => ImageFormat::Jpeg,
+            _ => ImageFormat::Png,
+        };
+        let crop = match (self.crop_x, self.crop_y, self.crop_w, self.crop_h) {
+            (Some(x), Some(y), Some(w), Some(h)) => Some((x, y, w, h)),
+            _ => None,
+        };
+        crate::image::ImageOpts {
+            format,
+            width: None,   // post-capture resize not driven by settings (use screen_width for viewport)
+            height: None,
+            quality: self.quality,
+            transparent: self.transparent,
+            crop,
+            zoom: self.zoom,
+            screen_width: self.screen_width,
+        }
+    }
+
+    /// Build a [`crate::render::LoadSettings`] from the networking and
+    /// security-policy fields.
+    pub fn to_load_settings(&self) -> crate::render::LoadSettings {
+        use crate::policy::ResourcePolicy;
+        let policy = if self.safe_mode {
+            ResourcePolicy {
+                allowed_paths: self.allowed_paths.clone(),
+                allow_external_links: !self.block_external_links,
+                allow_internal_links: !self.block_internal_links,
+                ..ResourcePolicy::safe_profile()
+            }
+        } else {
+            ResourcePolicy {
+                allow_local_file: self.allow_local_file_access,
+                allowed_paths: self.allowed_paths.clone(),
+                block_private_ips: false,
+                allow_external_links: !self.block_external_links,
+                allow_internal_links: !self.block_internal_links,
+            }
+        };
+
+        crate::render::LoadSettings {
+            cookies: self.cookies.clone(),
+            custom_headers: self.custom_headers.clone(),
+            username: if self.username.is_empty() { None } else { Some(self.username.clone()) },
+            password: if self.password.is_empty() { None } else { Some(self.password.clone()) },
+            proxy: self.proxy.clone(),
+            no_check_certificate: self.no_check_certificate,
+            enable_javascript: self.enable_javascript,
+            allow_local_file_access: self.allow_local_file_access,
+            compat_ua_css: None,
+            policy,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Length parser
 // ---------------------------------------------------------------------------
 /// Parse a length string to **millimetres**.
