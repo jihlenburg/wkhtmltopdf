@@ -3,8 +3,15 @@ use std::path::PathBuf;
 
 pub fn find_chrome() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("WKHTMLTOX_CHROME") {
-        let pb = PathBuf::from(p);
-        if pb.exists() { return Some(pb); }
+        let pb = PathBuf::from(&p);
+        if pb.exists() {
+            return Some(pb);
+        }
+        eprintln!(
+            "wkhtmltox: WKHTMLTOX_CHROME={p:?} does not exist; \
+             platform-default Chrome search is disabled when the env var is set"
+        );
+        return None;
     }
     const CANDIDATES: &[&str] = &[
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",

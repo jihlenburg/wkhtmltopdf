@@ -73,7 +73,7 @@ else:
 OUT_DIR = SCRIPT_DIR / f"out-{CORPUS_DIR.name}"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-ORACLE_BIN = Path("/Users/jihlenburg/.local/wkhtmltox/bin/wkhtmltopdf")
+ORACLE_BIN = Path(os.environ.get("WKHTMLTOX_ORACLE", "/Users/jihlenburg/.local/wkhtmltox/bin/wkhtmltopdf"))
 
 CORPUS_FILES = sorted(CORPUS_DIR.glob("*.html"))
 

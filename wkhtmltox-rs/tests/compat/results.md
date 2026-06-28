@@ -6,20 +6,21 @@
 
         ## Metrics
 
-        | Document     | p_ref | p_new |  Δp | text_sim | outline ref/new | mean_ssim | min_ssim | px_diff% | score  |
-|:-------------|------:|------:|----:|---------:|:----------------|----------:|---------:|---------:|-------:|
-| cssbox       |     1 |     1 |  +0 | 1.0000  |  1/1  (1.00) | 0.8007 | 0.8007 |  4.42% | 0.9336 |
-| fonts        |     1 |     1 |  +0 | 1.0000  |  1/1  (1.00) | 0.8670 | 0.8670 |  2.24% | 0.9557 |
-| headings     |     1 |     2 |  +1 | 1.0000  | 11/11 (1.00) | 0.6094 | 0.6094 |  9.45% | 0.5365 |
-| longtext     |     2 |     3 |  +1 | 1.0000  |  1/1  (1.00) | 0.4303 | 0.4079 | 13.20% | 0.6434 |
-| table        |     1 |     1 |  +0 | 1.0000  |  1/1  (1.00) | 0.8370 | 0.8370 |  3.72% | 0.9457 |
-| text         |     1 |     1 |  +0 | 1.0000  |  1/1  (1.00) | 0.7601 | 0.7601 |  5.50% | 0.9200 |
+        | Document                     | status        | p_ref | p_new |  Δp | text_sim | outline ref/new | mean_ssim | min_ssim | px_diff% | score  |
+|:-----------------------------|:--------------|------:|------:|----:|---------:|:----------------|----------:|---------:|---------:|-------:|
+| cssbox                       | OK            |  1 |  1 |  +0 | 1.0000  |  1/1  (1.00) | 0.8007 | 0.8007 |  4.42% | 0.9336 |
+| fonts                        | OK            |  1 |  1 |  +0 | 1.0000  |  1/1  (1.00) | 0.8670 | 0.8670 |  2.24% | 0.9557 |
+| headings                     | OK            |  1 |  2 |  +1 | 1.0000  | 11/11 (1.00) | 0.6094 | 0.6094 |  9.45% | 0.5365 |
+| longtext                     | OK            |  2 |  3 |  +1 | 1.0000  |  1/1  (1.00) | 0.4303 | 0.4079 | 13.20% | 0.6434 |
+| table                        | OK            |  1 |  1 |  +0 | 1.0000  |  1/1  (1.00) | 0.8370 | 0.8370 |  3.72% | 0.9457 |
+| text                         | OK            |  1 |  1 |  +0 | 1.0000  |  1/1  (1.00) | 0.7601 | 0.7601 |  5.50% | 0.9200 |
 
 
-**Aggregate (6 docs)**: mean_text_sim=1.0  mean_ssim=0.7174  min_ssim_overall=0.4079  mean_px_diff=6.423%  mean_score=0.8225  total_|Δpages|=2
+**Aggregate (6 OK / 0 errors)**: mean_text_sim=1.0  mean_ssim=0.7174  min_ssim_overall=0.4079  mean_px_diff=6.423%  mean_score=0.8225  total_|Δpages|=2
 
         ## Legend
 
+        - **status**: OK | ORACLE_CRASH | ORACLE_ERROR | NEW_CRASH | NEW_ERROR | METRICS_ERROR
         - **p_ref / p_new**: page count from oracle / new engine
         - **Δp**: page count difference (new − ref)
         - **text_sim**: SequenceMatcher ratio on whitespace-normalised extracted text (0=none, 1=identical)

@@ -20,6 +20,10 @@ pub struct LoadSettings {
     pub password: Option<String>,
     pub proxy: Option<String>,
     pub no_check_certificate: bool,
+    /// When `true`, JavaScript execution is enabled for this page load.
+    /// Defaults to `false` via `#[derive(Default)]`; note that the legacy
+    /// wkhtmltopdf binary defaults JavaScript **on** — callers must opt in
+    /// explicitly to match that behaviour.
     pub enable_javascript: bool,
     pub allow_local_file_access: bool,
 }

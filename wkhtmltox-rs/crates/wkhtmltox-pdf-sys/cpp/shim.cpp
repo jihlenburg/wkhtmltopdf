@@ -1,7 +1,13 @@
 // wkhtmltox-rs — LGPL-3.0-or-later.
 #include "shim.h"
+#include <string>
 #include <qpdf/QPDF.hh>
 #include <qpdf/QPDFWriter.hh>
+#include <qpdf/QPDFObjectHandle.hh>
+#include <qpdf/QPDFAcroFormDocumentHelper.hh>
+#include <qpdf/QPDFPageDocumentHelper.hh>
+#include <qpdf/QPDFFormFieldObjectHelper.hh>
+#include <qpdf/QPDFAnnotationObjectHelper.hh>
 
 extern "C" int wkx_pdf_roundtrip(const char* in_path, const char* out_path) {
     try {
@@ -10,19 +16,12 @@ extern "C" int wkx_pdf_roundtrip(const char* in_path, const char* out_path) {
         QPDFWriter w(q, out_path);
         w.write();
         return 0;
-    } catch (std::exception& e) {
+    } catch (const std::exception&) {
         return 1;
     } catch (...) {
         return 2; // unknown exception must not unwind across extern "C"
     }
 }
-
-#include <qpdf/QPDFObjectHandle.hh>
-#include <qpdf/QPDFAcroFormDocumentHelper.hh>
-#include <qpdf/QPDFPageDocumentHelper.hh>
-#include <qpdf/QPDFFormFieldObjectHelper.hh>
-#include <qpdf/QPDFAnnotationObjectHelper.hh>
-#include <string>
 
 extern "C" int wkx_pdf_add_text_field(const char* in_path, const char* out_path,
                                       const char* field_name, int page_index,
@@ -64,7 +63,7 @@ extern "C" int wkx_pdf_add_text_field(const char* in_path, const char* out_path,
         QPDFWriter wr(q, out_path);
         wr.write();
         return 0;
-    } catch (std::exception& e) {
+    } catch (const std::exception&) {
         return 1;
     } catch (...) {
         return 3; // unknown exception must not unwind across extern "C"

@@ -1,9 +1,12 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tungstenite::{connect as ws_connect, Message, WebSocket};
 use tungstenite::stream::MaybeTlsStream;
 use std::net::TcpStream;
 use wkhtmltox_core::{Result, WkError};
+
+/// Maximum time a single CDP command is allowed to wait for a response.
+const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 type Sock = WebSocket<MaybeTlsStream<TcpStream>>;
 
@@ -39,13 +42,19 @@ impl Cdp {
     pub fn call(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
         self.next_id += 1;
         let id = self.next_id;
+        let deadline = Instant::now() + CALL_TIMEOUT;
         self.sock
             .send(Message::Text(request_frame(id, method, &params)))
             .map_err(|e| WkError::Engine(format!("cdp send: {e}")))?;
         loop {
             let msg = match self.sock.read() {
                 Ok(m) => m,
-                Err(e) if is_read_timeout(&e) => continue,
+                Err(e) if is_read_timeout(&e) => {
+                    if Instant::now() >= deadline {
+                        return Err(WkError::Engine(format!("cdp call timeout: {method}")));
+                    }
+                    continue;
+                }
                 Err(e) => return Err(WkError::Engine(format!("cdp read: {e}"))),
             };
             if let Message::Text(t) = msg {
