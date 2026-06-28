@@ -14,4 +14,5 @@ pub mod render;
 pub mod settings;
 pub mod testing;
 pub mod toc;
+pub mod tocxsl;
 pub use error::{Result, WkError};
