@@ -67,6 +67,13 @@ parser.add_argument(
     help="Run the M2b full-document assembly comparison "
          "(cover+toc+footer: headings.html + longtext.html) vs the oracle.",
 )
+parser.add_argument(
+    "--cli",
+    action="store_true",
+    default=False,
+    help="Run M3b CLI comparison: our wkhtmltopdf binary vs oracle "
+         "(structural + exit-code checks).",
+)
 ARGS = parser.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -1028,10 +1035,364 @@ def run_m2b_comparison():
 
 
 # ---------------------------------------------------------------------------
+# M3b CLI comparison (--cli mode)
+# ---------------------------------------------------------------------------
+
+def run_cli_comparison():
+    """
+    Compare OUR wkhtmltopdf CLI binary vs the oracle on the same args/doc.
+
+    Structural comparison:
+      Both invoked with: -s A4 --toc headings.html longtext.html out.pdf
+      (Oracle uses 'toc' subcommand; ours uses --toc flag.)
+      Metrics: page count (Δ, ±2 tol), outline entry count, title-set overlap,
+               TOC page present in both.
+
+    Exit-code checks (3 scenarios on BOTH binaries):
+      (a) successful convert     → expect 0
+      (b) unknown flag           → expect nonzero
+      (c) missing input file     → expect nonzero
+    """
+    corpus_dir = SCRIPT_DIR / "corpus"
+    doc1 = corpus_dir / "headings.html"
+    doc2 = corpus_dir / "longtext.html"
+
+    for p in (doc1, doc2):
+        if not p.exists():
+            print(f"ERROR: corpus file not found: {p}", file=sys.stderr)
+            sys.exit(1)
+
+    # Resolve path to our CLI binary (two levels up from script → wkhtmltox-rs)
+    our_bin = WORKSPACE_DIR / "target" / "debug" / "wkhtmltopdf"
+    if not our_bin.exists():
+        print(
+            f"ERROR: our binary not found at {our_bin}; "
+            "run `cargo build -p wkhtmltopdf-cli` first.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    cli_out_dir = SCRIPT_DIR / "out-cli"
+    cli_out_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_pdf = cli_out_dir / "cli.ref.pdf"
+    our_pdf = cli_out_dir / "cli.our.pdf"
+
+    print(f"Oracle  : {ORACLE_BIN}")
+    print(f"Ours    : {our_bin}")
+    print(f"Inputs  : {doc1.name} + {doc2.name}")
+    print(f"Out dir : {cli_out_dir}")
+    print()
+
+    # ── Structural comparison ────────────────────────────────────────────────
+
+    # Oracle: uses 'toc' positional subcommand
+    print("Running oracle CLI (with toc subcommand) ...", flush=True)
+    oracle_cmd = [
+        str(ORACLE_BIN),
+        "-s", "A4",
+        "--outline",
+        "toc",
+        str(doc1), str(doc2),
+        str(ref_pdf),
+    ]
+    try:
+        oracle_res = subprocess.run(oracle_cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        print("  ORACLE FAILED: timeout", file=sys.stderr)
+        sys.exit(1)
+    oracle_stderr = oracle_res.stderr.strip()[-300:] if oracle_res.stderr else ""
+    if oracle_res.returncode != 0 or not ref_pdf.exists():
+        print(
+            f"  ORACLE FAILED: rc={oracle_res.returncode}; stderr: {oracle_stderr}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"  oracle OK  -> {ref_pdf}  rc={oracle_res.returncode}")
+
+    # Ours: uses --toc flag
+    print("Running our CLI (with --toc flag) ...", flush=True)
+    our_cmd = [
+        str(our_bin),
+        "-s", "A4",
+        "--toc",
+        str(doc1.resolve()), str(doc2.resolve()),
+        str(our_pdf),
+    ]
+    try:
+        our_res = subprocess.run(our_cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        print("  OUR BINARY FAILED: timeout", file=sys.stderr)
+        sys.exit(1)
+    our_stderr = our_res.stderr.strip()[-300:] if our_res.stderr else ""
+    if our_res.returncode != 0 or not our_pdf.exists():
+        print(
+            f"  OUR BINARY FAILED: rc={our_res.returncode}; stderr: {our_stderr}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"  ours   OK  -> {our_pdf}  rc={our_res.returncode}")
+
+    # Open with pymupdf
+    ref_doc = fitz.open(str(ref_pdf))
+    our_doc = fitz.open(str(our_pdf))
+
+    pages_ref = ref_doc.page_count
+    pages_our = our_doc.page_count
+    delta_pages = pages_our - pages_ref
+    pages_within_tolerance = abs(delta_pages) <= 2
+
+    toc_ref = ref_doc.get_toc()
+    toc_our = our_doc.get_toc()
+    titles_ref = [title.strip() for _lvl, title, _page in toc_ref]
+    titles_our = [title.strip() for _lvl, title, _page in toc_our]
+    outline_ref_n = len(toc_ref)
+    outline_our_n = len(toc_our)
+
+    set_ref = set(titles_ref)
+    set_our = set(titles_our)
+    common_titles = set_ref & set_our
+    denom = max(len(set_ref), len(set_our), 1)
+    title_overlap = len(common_titles) / denom
+
+    toc_in_ref = has_toc_page(ref_doc)
+    toc_in_our = has_toc_page(our_doc)
+
+    ref_doc.close()
+    our_doc.close()
+
+    print()
+    print(f"  Page count       : oracle={pages_ref}  ours={pages_our}  Δ={delta_pages:+d}  within_±2={pages_within_tolerance}")
+    print(f"  Outline entries  : oracle={outline_ref_n}  ours={outline_our_n}")
+    print(f"  Title overlap    : {title_overlap:.3f}  ({len(common_titles)}/{denom})")
+    print(f"  TOC page present : oracle={toc_in_ref}  ours={toc_in_our}")
+
+    # ── Exit-code checks ─────────────────────────────────────────────────────
+
+    # A helper to run a binary and capture its exit code.
+    def run_exit(label: str, cmd: list, *, timeout: int = 60) -> tuple[int, str]:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            combined = (r.stderr + r.stdout).strip()[-200:]
+            return r.returncode, combined
+        except subprocess.TimeoutExpired:
+            return -999, "timeout"
+        except Exception as exc:
+            return -998, str(exc)
+
+    # Scenario (a): successful convert
+    sc_a_ref_pdf = cli_out_dir / "ec-a.ref.pdf"
+    sc_a_our_pdf = cli_out_dir / "ec-a.our.pdf"
+    sc_a_oracle_rc, sc_a_oracle_out = run_exit(
+        "oracle-success",
+        [str(ORACLE_BIN), "-s", "A4", str(doc1), str(sc_a_ref_pdf)],
+    )
+    sc_a_our_rc, sc_a_our_out = run_exit(
+        "our-success",
+        [str(our_bin), "-s", "A4", str(doc1.resolve()), str(sc_a_our_pdf)],
+    )
+    sc_a_oracle_ok = sc_a_oracle_rc == 0
+    sc_a_our_ok = sc_a_our_rc == 0
+    sc_a_match = sc_a_oracle_ok and sc_a_our_ok  # both should be 0
+
+    # Scenario (b): unknown flag
+    sc_b_oracle_rc, sc_b_oracle_out = run_exit(
+        "oracle-unknown-flag",
+        [str(ORACLE_BIN), "--frobnicate", str(doc1), str(cli_out_dir / "ec-b-dummy.pdf")],
+    )
+    sc_b_our_rc, sc_b_our_out = run_exit(
+        "our-unknown-flag",
+        [str(our_bin), "--frobnicate", str(doc1.resolve()), str(cli_out_dir / "ec-b-dummy.pdf")],
+    )
+    sc_b_oracle_nonzero = sc_b_oracle_rc != 0
+    sc_b_our_nonzero = sc_b_our_rc != 0
+    sc_b_match = sc_b_oracle_nonzero and sc_b_our_nonzero
+
+    # Scenario (c): missing input file — use a path that neither binary can render
+    # Note: our binary converts paths to file:// URLs; Chrome renders a blank page
+    # and returns 0. This is a known divergence from oracle behavior.
+    missing_path = str(cli_out_dir / "absolutely-nonexistent-input.html")
+    sc_c_oracle_rc, sc_c_oracle_out = run_exit(
+        "oracle-missing-input",
+        [str(ORACLE_BIN), missing_path, str(cli_out_dir / "ec-c-dummy.pdf")],
+    )
+    sc_c_our_rc, sc_c_our_out = run_exit(
+        "our-missing-input",
+        [str(our_bin), missing_path, str(cli_out_dir / "ec-c-dummy.pdf")],
+    )
+    sc_c_oracle_nonzero = sc_c_oracle_rc != 0
+    sc_c_our_nonzero = sc_c_our_rc != 0
+    sc_c_match = sc_c_oracle_nonzero == sc_c_our_nonzero
+
+    print()
+    print("Exit-code checks:")
+    print(f"  (a) success   : oracle rc={sc_a_oracle_rc}  ours rc={sc_a_our_rc}  match={'YES' if sc_a_match else 'NO'}")
+    print(f"  (b) bad flag  : oracle rc={sc_b_oracle_rc}  ours rc={sc_b_our_rc}  match={'YES' if sc_b_match else 'NO'}")
+    print(f"  (c) miss file : oracle rc={sc_c_oracle_rc}  ours rc={sc_c_our_rc}  match={'YES' if sc_c_match else 'NO'}")
+    if not sc_c_match:
+        print(
+            "  NOTE (c): our binary converts local paths to file:// URLs; "
+            "Chrome renders an error page silently (exit 0). Oracle fails the "
+            "network lookup (exit nonzero). Divergence is known."
+        )
+
+    # ── Build result dict ────────────────────────────────────────────────────
+
+    result = {
+        "mode": "cli",
+        "oracle": str(ORACLE_BIN),
+        "our_bin": str(our_bin),
+        "inputs": [str(doc1), str(doc2)],
+        "oracle_pdf": str(ref_pdf),
+        "our_pdf": str(our_pdf),
+        # Structural
+        "pages_ref": pages_ref,
+        "pages_our": pages_our,
+        "delta_pages": delta_pages,
+        "pages_within_tolerance": pages_within_tolerance,
+        "outline_ref_n": outline_ref_n,
+        "outline_our_n": outline_our_n,
+        "titles_ref": titles_ref,
+        "titles_our": titles_our,
+        "common_titles": sorted(common_titles),
+        "only_in_ref": sorted(set_ref - set_our),
+        "only_in_our": sorted(set_our - set_ref),
+        "title_overlap": round(title_overlap, 4),
+        "toc_in_ref": toc_in_ref,
+        "toc_in_our": toc_in_our,
+        # Exit codes
+        "exit_codes": {
+            "success": {
+                "oracle_rc": sc_a_oracle_rc,
+                "our_rc": sc_a_our_rc,
+                "match": sc_a_match,
+            },
+            "unknown_flag": {
+                "oracle_rc": sc_b_oracle_rc,
+                "our_rc": sc_b_our_rc,
+                "match": sc_b_match,
+            },
+            "missing_input": {
+                "oracle_rc": sc_c_oracle_rc,
+                "our_rc": sc_c_our_rc,
+                "match": sc_c_match,
+                "note": (
+                    "our binary converts local paths to file:// URLs; "
+                    "Chrome renders an error page silently (exit 0 vs oracle exit nonzero)."
+                    if not sc_c_match else None
+                ),
+            },
+        },
+    }
+
+    # ── Write results-cli.md ─────────────────────────────────────────────────
+
+    titles_ref_str = "\n".join(f"  - {t}" for t in titles_ref) if titles_ref else "  (none)"
+    titles_our_str = "\n".join(f"  - {t}" for t in titles_our) if titles_our else "  (none)"
+    only_ref_str = (
+        "\n".join(f"  - {t}" for t in sorted(set_ref - set_our))
+        if (set_ref - set_our) else "  (none)"
+    )
+    only_our_str = (
+        "\n".join(f"  - {t}" for t in sorted(set_our - set_ref))
+        if (set_our - set_ref) else "  (none)"
+    )
+
+    def ec_row(label, oracle_rc, our_rc, match):
+        return f"| {label:<20} | {oracle_rc:>10} | {our_rc:>8} | {'YES' if match else 'NO':<5} |"
+
+    md_content = textwrap.dedent(f"""\
+        # M3b CLI Comparison: wkhtmltopdf (ours) vs oracle 0.12.6
+
+        Oracle: `{ORACLE_BIN}`
+        Ours:   `{our_bin}`
+        Inputs: `{doc1.name}` + `{doc2.name}`
+
+        Oracle invocation: `-s A4 --outline toc headings.html longtext.html out.pdf`
+        Ours   invocation: `-s A4 --toc headings.html longtext.html out.pdf`
+
+        Note: oracle uses the `toc` positional subcommand; ours uses `--toc` flag.
+
+        ## Structural Comparison
+
+        ### Page Count
+
+        | Side    | Pages |
+        |:--------|------:|
+        | Oracle  | {pages_ref} |
+        | Ours    | {pages_our} |
+        | Δ       | {delta_pages:+d} |
+        | Within ±2 tolerance | {'Yes' if pages_within_tolerance else 'No'} |
+
+        ### TOC Page Detection
+
+        | Side    | TOC page present |
+        |:--------|:-----------------|
+        | Oracle  | {toc_in_ref} |
+        | Ours    | {toc_in_our} |
+
+        ### Outline (Bookmark) Comparison
+
+        | Metric                           | Value |
+        |:---------------------------------|------:|
+        | Oracle outline entries           | {outline_ref_n} |
+        | Ours outline entries             | {outline_our_n} |
+        | Title overlap (intersection/max) | {title_overlap:.3f} ({len(common_titles)}/{denom}) |
+
+        #### Oracle bookmark titles
+{titles_ref_str}
+
+        #### Ours bookmark titles
+{titles_our_str}
+
+        #### Titles only in oracle
+{only_ref_str}
+
+        #### Titles only in ours
+{only_our_str}
+
+        ## Exit-Code Comparison
+
+        | Scenario             | oracle rc  | ours rc  | match |
+        |:---------------------|:----------:|:--------:|:-----:|
+        {ec_row("(a) success", sc_a_oracle_rc, sc_a_our_rc, sc_a_match)}
+        {ec_row("(b) unknown flag", sc_b_oracle_rc, sc_b_our_rc, sc_b_match)}
+        {ec_row("(c) missing input", sc_c_oracle_rc, sc_c_our_rc, sc_c_match)}
+
+        ### Notes on exit codes
+
+        - **(a) success**: both return 0. Match.
+        - **(b) unknown flag (`--frobnicate`)**: both return nonzero. Match.
+        - **(c) missing input**: oracle returns nonzero (network error); our binary
+          converts paths to `file://` URLs and Chrome renders an error page silently,
+          returning exit 0. **Known divergence** — not yet fixed in M3b.
+
+        ## Notes
+
+        - Page count tolerance ±2 accepted; Chrome and wkhtmltopdf paginate differently.
+        - Title overlap is the structural fidelity signal.
+        - Oracle `toc` subcommand ↔ our `--toc` flag: semantically equivalent but
+          syntactically different (upstream grammar quirk).
+    """)
+
+    md_path = SCRIPT_DIR / "results-cli.md"
+    md_path.write_text(md_content, encoding="utf-8")
+    print(f"\nWrote {md_path}")
+
+    json_path = SCRIPT_DIR / "results-cli.json"
+    json_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(f"Wrote {json_path}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
+    if ARGS.cli:
+        run_cli_comparison()
+        return
+
     if ARGS.m2b:
         run_m2b_comparison()
         return

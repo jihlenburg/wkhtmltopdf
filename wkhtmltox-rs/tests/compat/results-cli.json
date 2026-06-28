@@ -1,0 +1,85 @@
+{
+  "mode": "cli",
+  "oracle": "/Users/jihlenburg/.local/wkhtmltox/bin/wkhtmltopdf",
+  "our_bin": "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/target/debug/wkhtmltopdf",
+  "inputs": [
+    "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/corpus/headings.html",
+    "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/corpus/longtext.html"
+  ],
+  "oracle_pdf": "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/out-cli/cli.ref.pdf",
+  "our_pdf": "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/out-cli/cli.our.pdf",
+  "pages_ref": 4,
+  "pages_our": 6,
+  "delta_pages": 2,
+  "pages_within_tolerance": true,
+  "outline_ref_n": 13,
+  "outline_our_n": 13,
+  "titles_ref": [
+    "Table of Contents",
+    "Chapter 1: Introduction",
+    "1.1 Background",
+    "1.1.1 Historical Context",
+    "1.1.2 Prior Work",
+    "1.2 Problem Statement",
+    "1.2.1 Scope",
+    "1.2.2 Constraints",
+    "Chapter 2: Methodology",
+    "2.1 Approach",
+    "2.1.1 Algorithm",
+    "2.2 Evaluation",
+    "Long Document \u2014 Pagination Drift Test"
+  ],
+  "titles_our": [
+    "Table of Contents",
+    "Chapter 1: Introduction",
+    "1.1 Background",
+    "1.1.1 Historical Context",
+    "1.1.2 Prior Work",
+    "1.2 Problem Statement",
+    "1.2.1 Scope",
+    "1.2.2 Constraints",
+    "Chapter 2: Methodology",
+    "2.1 Approach",
+    "2.1.1 Algorithm",
+    "2.2 Evaluation",
+    "Long Document \u2014 Pagination Drift Test"
+  ],
+  "common_titles": [
+    "1.1 Background",
+    "1.1.1 Historical Context",
+    "1.1.2 Prior Work",
+    "1.2 Problem Statement",
+    "1.2.1 Scope",
+    "1.2.2 Constraints",
+    "2.1 Approach",
+    "2.1.1 Algorithm",
+    "2.2 Evaluation",
+    "Chapter 1: Introduction",
+    "Chapter 2: Methodology",
+    "Long Document \u2014 Pagination Drift Test",
+    "Table of Contents"
+  ],
+  "only_in_ref": [],
+  "only_in_our": [],
+  "title_overlap": 1.0,
+  "toc_in_ref": true,
+  "toc_in_our": true,
+  "exit_codes": {
+    "success": {
+      "oracle_rc": 0,
+      "our_rc": 0,
+      "match": true
+    },
+    "unknown_flag": {
+      "oracle_rc": 1,
+      "our_rc": 1,
+      "match": true
+    },
+    "missing_input": {
+      "oracle_rc": 1,
+      "our_rc": 0,
+      "match": false,
+      "note": "our binary converts local paths to file:// URLs; Chrome renders an error page silently (exit 0 vs oracle exit nonzero)."
+    }
+  }
+}
