@@ -206,6 +206,55 @@ pub fn add_links(in_path: &Path, out_path: &Path, links: &[LinkSpec]) -> Result<
     }
 }
 
+/// One interactive text field to add: name, 0-based page, PDF-point rect
+/// `[x0, y0, x1, y1]` (bottom-up origin, same coordinate system as [`add_links`]).
+#[derive(Debug, Clone)]
+pub struct TextFieldSpec {
+    pub name: String,
+    pub page_index: u32,
+    pub rect: [f64; 4],
+}
+
+/// Add interactive `/Tx` AcroForm text fields to `pdf` bytes, returning new bytes.
+///
+/// Reuses the tested single-field shim [`wkx_pdf_add_text_field`]; each call
+/// rewrites the file, so this is O(n) in field count — fine for the handful of
+/// fields a page typically carries.
+///
+/// The shim receives `(x, y, w, h)` coordinates; width and height are derived
+/// from `rect`: `w = rect[2] - rect[0]`, `h = rect[3] - rect[1]`.
+pub fn add_text_fields(pdf: &[u8], fields: &[TextFieldSpec]) -> Result<Vec<u8>, String> {
+    if fields.is_empty() {
+        return Ok(pdf.to_vec());
+    }
+    let dir = tempfile::TempDir::new().map_err(|e| e.to_string())?;
+    let mut cur = dir.path().join("cur.pdf");
+    std::fs::write(&cur, pdf).map_err(|e| e.to_string())?;
+    for (i, f) in fields.iter().enumerate() {
+        let out = dir.path().join(format!("o{i}.pdf"));
+        let in_c = CString::new(cur.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+        let out_c = CString::new(out.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+        let name_c = CString::new(f.name.as_str()).map_err(|e| e.to_string())?;
+        let rc = unsafe {
+            wkx_pdf_add_text_field(
+                in_c.as_ptr(),
+                out_c.as_ptr(),
+                name_c.as_ptr(),
+                f.page_index as c_int,
+                f.rect[0],
+                f.rect[1],
+                f.rect[2] - f.rect[0],
+                f.rect[3] - f.rect[1],
+            )
+        };
+        if rc != 0 {
+            return Err(format!("wkx_pdf_add_text_field rc={rc}"));
+        }
+        cur = out;
+    }
+    std::fs::read(&cur).map_err(|e| e.to_string())
+}
+
 /// Safe wrapper: merge `inputs` (in order) into `out`. Confines all unsafe here.
 pub fn merge(inputs: &[PathBuf], out: &Path) -> Result<(), String> {
     let cs: Vec<CString> = inputs

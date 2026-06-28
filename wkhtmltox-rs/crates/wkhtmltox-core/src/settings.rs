@@ -252,6 +252,9 @@ pub struct GlobalSettings {
     // --- Document structure --------------------------------------------
     /// Prepend a Table of Contents page (default false).
     pub produce_toc: bool,
+    /// Produce interactive AcroForm text fields from HTML inputs (default false,
+    /// from `produceForms` / `--enable-forms`).
+    pub produce_forms: bool,
     /// Embed a PDF outline / bookmark tree (default true, from `outline`).
     pub produce_outline: bool,
     /// Maximum depth of the generated outline (default 4, from `outlineDepth`).
@@ -313,6 +316,7 @@ impl Default for GlobalSettings {
             header: HeaderFooterSettings::default(),
             footer: HeaderFooterSettings::default(),
             produce_toc: false,
+            produce_forms: false,
             produce_outline: true,
             outline_depth: 4,
             document_title: String::new(),
@@ -381,6 +385,7 @@ impl GlobalSettings {
         AssembleOpts {
             number: false,
             with_toc: self.produce_toc,
+            produce_forms: self.produce_forms,
             header,
             footer,
             header_footer_font_size: font_size,
@@ -464,6 +469,11 @@ pub struct PdfObjectSettings {
     pub include_in_outline: bool,
     pub pages_count: bool,
     pub is_table_of_content: bool,
+    /// Whether this object's form fields should become interactive AcroForm
+    /// fields.  Mirrors the upstream `produceForms` per-object setting.
+    /// The assembly currently uses `AssembleOpts.produce_forms` (the global
+    /// flag); this per-object value is stored for API compatibility.
+    pub produce_forms: bool,
 
     // --- Internal ---
     pub warnings: Vec<String>,
@@ -485,6 +495,7 @@ impl Default for PdfObjectSettings {
             include_in_outline: true,
             pages_count: true,
             is_table_of_content: false,
+            produce_forms: false,
             warnings: Vec::new(),
         }
     }

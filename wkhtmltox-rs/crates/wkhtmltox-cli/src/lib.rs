@@ -207,6 +207,7 @@ static FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "no-background",       short: None,      target: Target::Both, action: Action::Const("web.background",       "false") },
     FlagSpec { long: "enable-javascript",   short: None,      target: Target::Both, action: Action::Const("web.enableJavascript", "true")  },
     FlagSpec { long: "disable-javascript",  short: Some('n'), target: Target::Both, action: Action::Const("web.enableJavascript", "false") },
+    FlagSpec { long: "enable-forms",        short: None,      target: Target::Global, action: Action::Const("produceForms", "true")        },
     FlagSpec { long: "images",              short: None,      target: Target::Both, action: Action::Const("web.loadImages",        "true")  },
     FlagSpec { long: "no-images",           short: None,      target: Target::Both, action: Action::Const("web.loadImages",        "false") },
 

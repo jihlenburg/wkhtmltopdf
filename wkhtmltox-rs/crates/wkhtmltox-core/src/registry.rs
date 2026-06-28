@@ -158,6 +158,7 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
 
         // ── document structure ────────────────────────────────────────────
         "toc" => g.produce_toc = parse_bool(value)?,
+        "produceForms" => g.produce_forms = parse_bool(value)?,
         "outline" => g.produce_outline = parse_bool(value)?,
         "outlineDepth" => {
             g.outline_depth = value
@@ -283,6 +284,7 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
         "includeInOutline" => o.include_in_outline = parse_bool(value)?,
         "pagesCount" => o.pages_count = parse_bool(value)?,
         "isTableOfContent" => o.is_table_of_content = parse_bool(value)?,
+        "produceForms" => o.produce_forms = parse_bool(value)?,
 
         // ── TOC sub-settings (partially recognised) ───────────────────────
         "toc.useDottedLines"
@@ -300,7 +302,6 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
         "useExternalLinks"
         | "useLocalLinks"
         | "replacements"
-        | "produceForms"
         | "tocXsl"
         | "load.proxy"
         | "load.cookieJar"
@@ -421,6 +422,7 @@ pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
 
         // ── document structure ────────────────────────────────────────────
         "toc" => g.produce_toc.to_string(),
+        "produceForms" => g.produce_forms.to_string(),
         "outline" => g.produce_outline.to_string(),
         "outlineDepth" => g.outline_depth.to_string(),
         "documentTitle" => g.document_title.clone(),
@@ -496,6 +498,7 @@ pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
         "includeInOutline" => o.include_in_outline.to_string(),
         "pagesCount" => o.pages_count.to_string(),
         "isTableOfContent" => o.is_table_of_content.to_string(),
+        "produceForms" => o.produce_forms.to_string(),
 
         // ── recognised-but-unimplemented → return empty default ───────────
         "toc.useDottedLines"
@@ -507,7 +510,6 @@ pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
         | "useExternalLinks"
         | "useLocalLinks"
         | "replacements"
-        | "produceForms"
         | "tocXsl"
         | "load.proxy"
         | "load.cookieJar"

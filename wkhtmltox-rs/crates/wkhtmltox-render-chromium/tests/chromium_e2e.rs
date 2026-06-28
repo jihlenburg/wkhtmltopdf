@@ -230,6 +230,50 @@ setTimeout(function() {{
     );
 }
 
+// ── AcroForm / forms tests (M6 Task 4) ──────────────────────────────────────
+
+/// End-to-end: HTML `<input type=text>` and `<textarea>` become interactive
+/// AcroForm `/Tx` fields when `produce_forms` is enabled.
+///
+/// Verifies: email + note → exactly 2 /AcroForm /Fields in the output PDF.
+///
+/// Checkbox/radio/select are post-v1 scope and are NOT tested here.
+#[test]
+#[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1 forms_become_acroform_fields"]
+fn forms_become_acroform_fields() {
+    use wkhtmltox_core::assembly::{assemble_pdf, AssembleOpts};
+    use wkhtmltox_core::render::{PageGeometry, Source};
+
+    let mut r = wkhtmltox_render_chromium::renderer::ChromiumRenderer::spawn().unwrap();
+    let html = "<html><body><form>\
+                <input type='text' name='email'>\
+                <textarea name='note'></textarea>\
+                </form></body></html>";
+    let opts = AssembleOpts { produce_forms: true, ..Default::default() };
+
+    let tmp = tempfile::NamedTempFile::new().expect("create temp output file");
+    assemble_pdf(&mut r, &[Source::Html(html.into())], &PageGeometry::default(), tmp.path(), &opts)
+        .expect("assemble_pdf must succeed");
+
+    let pdf = std::fs::read(tmp.path()).expect("read output pdf");
+    let doc = lopdf::Document::load_mem(&pdf).expect("parse output pdf");
+    let cat = doc.catalog().expect("catalog");
+    let acro = cat.get(b"AcroForm").expect("no /AcroForm — forms not produced");
+    // Dereference if stored as indirect reference.
+    let acro = acro
+        .as_reference()
+        .map(|r_id| doc.get_object(r_id).expect("deref /AcroForm"))
+        .unwrap_or(acro);
+    let fields = acro
+        .as_dict()
+        .expect("/AcroForm must be a dict")
+        .get(b"Fields")
+        .expect("/AcroForm must have /Fields")
+        .as_array()
+        .expect("/Fields must be an array");
+    assert_eq!(fields.len(), 2, "email + note → 2 AcroForm fields");
+}
+
 // ── Snapshot tests (M5 Task 1) ───────────────────────────────────────────────
 
 /// Basic smoke test: snapshot a simple data: page, get back a valid PNG whose

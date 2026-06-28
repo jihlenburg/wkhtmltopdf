@@ -1667,6 +1667,7 @@ dependencies = [
  "cc",
  "lopdf",
  "pkg-config",
+ "tempfile",
 ]
 
 [[package]]

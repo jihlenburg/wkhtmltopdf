@@ -2,6 +2,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{Result, WkError};
+use crate::forms;
 use crate::outline;
 use crate::render::{LoadSettings, PageGeometry, ReadyPolicy, Renderer, Source};
 
@@ -39,6 +40,11 @@ pub struct AssembleOpts {
     pub header_footer_font_size: f64,
     /// Document title substituted for `[title]` in header/footer templates.
     pub doc_title: String,
+    /// Produce interactive AcroForm `/Tx` fields for HTML `<input type=text>`
+    /// and `<textarea>` elements when `true` (default `false`).
+    ///
+    /// v1 scope: text fields only.  Checkbox/radio/select are noted as post-v1.
+    pub produce_forms: bool,
     /// An optional cover page rendered as the very first object.
     ///
     /// The cover is **excluded** from:
@@ -63,6 +69,7 @@ impl Default for AssembleOpts {
         Self {
             number: false,
             with_toc: false,
+            produce_forms: false,
             header: None,
             footer: None,
             header_footer_font_size: 9.0,
@@ -126,6 +133,9 @@ pub fn assemble_pdf(
         // NOTE(T5): internal link annotation synthesis is not yet wired into the
         // TOC path.  The named-dest extraction and coordinate mapping work
         // correctly for the non-TOC path; the TOC path is deferred to T6/M2c.
+        // NOTE(forms): AcroForm text-field synthesis mirrors the link deferral
+        // above.  Form fields are only produced on the non-TOC path; TOC-path
+        // support is deferred to post-v1 alongside link synthesis.
         return assemble_with_toc(
             r,
             objects,
@@ -147,6 +157,10 @@ pub fn assemble_pdf(
     // Accumulated /Link annotation specs: (src_page_global, rect_pt, dest_page_global).
     // Populated from probe `links` + named-dest extraction; see coordinate note below.
     let mut link_annots: Vec<wkhtmltox_pdf_sys::LinkSpec> = Vec::new();
+
+    // Accumulated AcroForm /Tx field specs (populated when opts.produce_forms).
+    // Applied after merge + links, using the same px→pt transform as link_annots.
+    let mut field_specs: Vec<wkhtmltox_pdf_sys::TextFieldSpec> = Vec::new();
 
     // APPROXIMATE: page height in PDF points estimated from `geom`, not the actual
     // rendered MediaBox.  Accurate when the renderer uses the given geometry (the
@@ -222,6 +236,35 @@ pub fn assemble_pdf(
             link_annots.push((global_src_page, [x0, pdf_y0, x1, pdf_y1], global_dest_page));
         }
 
+        // ── Synthesise AcroForm /Tx fields from HTML form inputs.
+        //
+        // Uses the IDENTICAL px→pt transform as the link synthesis above:
+        // ×0.75 scaling, geom-derived page height, top-down → bottom-up y flip,
+        // per-object global_src_page accounting.
+        if opts.produce_forms {
+            let fv = r.eval_json(p, forms::FORM_PROBE_JS)?;
+            for field in forms::parse_form_fields(&fv) {
+                let local_src_page = (field.top / page_height_px).floor() as u32;
+                if local_src_page >= n {
+                    continue; // top coordinate exceeds this object's page count
+                }
+                let global_src_page = cover_pages + content_offset + local_src_page;
+                let page_y_offset_px = local_src_page as f64 * page_height_px;
+                let x0 = field.rect[0] * 0.75;
+                let x1 = field.rect[2] * 0.75;
+                let css_y_top = (field.rect[1] - page_y_offset_px) * 0.75;
+                let css_y_bot = (field.rect[3] - page_y_offset_px) * 0.75;
+                // PDF rect: [x_left, y_bottom, x_right, y_top] with y from page bottom.
+                let pdf_y0 = (page_height_pt - css_y_bot).max(0.0);
+                let pdf_y1 = (page_height_pt - css_y_top).max(0.0);
+                field_specs.push(wkhtmltox_pdf_sys::TextFieldSpec {
+                    name: field.name,
+                    page_index: global_src_page,
+                    rect: [x0, pdf_y0, x1, pdf_y1],
+                });
+            }
+        }
+
         content_offset += n;
         content_parts.push(part);
     }
@@ -295,13 +338,27 @@ pub fn assemble_pdf(
     // Dest-page resolution (named-dest map) is exact.  Full validation deferred
     // to T6 oracle comparison.
     let pre_link = final_path;
-    let copy_src = if !link_annots.is_empty() {
+    let after_links = if !link_annots.is_empty() {
         let linked = work.path().join("linked.pdf");
         wkhtmltox_pdf_sys::add_links(&pre_link, &linked, &link_annots)
             .map_err(WkError::Pdf)?;
         linked
     } else {
         pre_link
+    };
+
+    // Optionally stamp AcroForm /Tx fields collected from the form-field probes.
+    // Applied after all other post-processing (merge, outline, cells, links) so
+    // it operates on the fully-assembled PDF.  Skipped when no fields were found.
+    let copy_src = if !field_specs.is_empty() {
+        let with_forms = work.path().join("with_forms.pdf");
+        let pdf_bytes = std::fs::read(&after_links).map_err(|e| WkError::Io(e.to_string()))?;
+        let new_bytes = wkhtmltox_pdf_sys::add_text_fields(&pdf_bytes, &field_specs)
+            .map_err(WkError::Pdf)?;
+        std::fs::write(&with_forms, &new_bytes).map_err(|e| WkError::Io(e.to_string()))?;
+        with_forms
+    } else {
+        after_links
     };
 
     // Copy result to the caller-supplied destination before `work` is dropped.
