@@ -1,5 +1,6 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
 use crate::error::Result;
+use crate::policy::ResourcePolicy;
 
 /// Opaque handle to a loaded page, owned by the backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,14 +22,19 @@ pub struct LoadSettings {
     pub proxy: Option<String>,
     pub no_check_certificate: bool,
     /// When `true`, JavaScript execution is enabled for this page load.
-    /// Defaults to `false` via `#[derive(Default)]`; note that the legacy
-    /// wkhtmltopdf binary defaults JavaScript **on** — callers must opt in
-    /// explicitly to match that behaviour.
+    /// Note that the legacy wkhtmltopdf binary defaults JavaScript **on** —
+    /// callers must opt in explicitly to match that behaviour.
     pub enable_javascript: bool,
     pub allow_local_file_access: bool,
     /// When set, the renderer injects this CSS as a UA-reset `<style>` before
     /// printing, to nudge output toward the wkhtmltopdf/Qt4-WebKit baseline.
     pub compat_ua_css: Option<String>,
+    /// Resource policy governing which URLs the renderer may load.
+    ///
+    /// Enforced via CDP `Fetch` interception during `open()`.  The **default**
+    /// is permissive (matching historic wkhtmltopdf behaviour).  Use
+    /// [`ResourcePolicy::safe_profile()`] or `--safe` to harden.
+    pub policy: ResourcePolicy,
 }
 
 #[derive(Debug, Clone, Default)]

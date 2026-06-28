@@ -5,6 +5,7 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 use base64::Engine as _; // see note in Step 4 about the base64 dep
 use serde_json::json;
+use wkhtmltox_core::policy::ResourcePolicy;
 use wkhtmltox_core::render::*;
 use wkhtmltox_core::{Result, WkError};
 use crate::cdp::{connect, Cdp};
@@ -65,9 +66,49 @@ pub struct ChromiumRenderer {
     /// every subsequent call to `open()` and cleared when a [`Source::Url`]
     /// is opened.
     _html_temp: Option<tempfile::NamedTempFile>,
+    /// URLs that were blocked by the [`ResourcePolicy`] during the most recent
+    /// `open()` call.  Cleared at the start of each `open()`.
+    blocked_urls: Vec<String>,
+}
+
+impl ChromiumRenderer {
+    /// Returns the list of URLs blocked by the `ResourcePolicy` during the
+    /// most recent [`open()`] call.
+    ///
+    /// The list is cleared at the start of each new `open()` call.
+    pub fn blocked_urls(&self) -> &[String] {
+        &self.blocked_urls
+    }
 }
 
 fn mm_to_in(mm: f64) -> f64 { mm / 25.4 }
+
+// ---------------------------------------------------------------------------
+// ResourcePolicy enforcement helpers
+// ---------------------------------------------------------------------------
+
+/// Decision for a single CDP `Fetch.requestPaused` event.
+///
+/// Factored out of the event pump so it can be unit-tested without a browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchDecision {
+    /// Allow the request to continue via `Fetch.continueRequest`.
+    Continue,
+    /// Abort the request via `Fetch.failRequest { errorReason: "Aborted" }`.
+    Fail,
+}
+
+/// Map a `ResourcePolicy` decision to a `FetchDecision`.
+///
+/// Pure helper — no I/O, no CDP calls.  Tests call this directly to verify
+/// the policy-to-action mapping without needing a real browser.
+pub fn fetch_action(policy: &ResourcePolicy, url: &str, is_redirect: bool) -> FetchDecision {
+    use wkhtmltox_core::policy::Decision;
+    match policy.decide(url, is_redirect) {
+        Decision::Allow => FetchDecision::Continue,
+        Decision::Block(_) => FetchDecision::Fail,
+    }
+}
 
 /// Build `Network.setCookies` params with the target URL as the cookie scope.
 ///
@@ -115,6 +156,7 @@ impl ChromiumRenderer {
     pub fn spawn() -> Result<Self> {
         Self::spawn_opts(SpawnOpts::default())
     }
+
 
     pub fn spawn_opts(opts: SpawnOpts) -> Result<Self> {
         let chrome = find_chrome().ok_or_else(|| WkError::Engine("no chrome found".into()))?;
@@ -171,7 +213,7 @@ impl ChromiumRenderer {
 
         // All succeeded — disarm the guard and hand ownership to ChromiumRenderer.
         let (child, user_data_dir) = guard.disarm();
-        Ok(Self { child, user_data_dir, cdp, compat_ua_css: None, _html_temp: None })
+        Ok(Self { child, user_data_dir, cdp, compat_ua_css: None, _html_temp: None, blocked_urls: Vec::new() })
     }
 }
 
@@ -216,6 +258,10 @@ impl Renderer for ChromiumRenderer {
             Source::Stdin =>
                 return Err(WkError::Engine("Stdin source not supported by ChromiumRenderer".into())),
         };
+
+        // Clear blocked-URLs from any previous open() call.
+        self.blocked_urls.clear();
+
         // Persist compat CSS so wait_ready() can inject it after the page loads.
         self.compat_ua_css = load.compat_ua_css.clone();
 
@@ -247,7 +293,159 @@ impl Renderer for ChromiumRenderer {
             self.cdp.call("Emulation.setScriptExecutionDisabled", json!({ "value": true }))?;
         }
 
-        self.cdp.call("Page.navigate", json!({ "url": url }))?;
+        // ── Enable Fetch interception for ResourcePolicy enforcement ──────────
+        //
+        // `Fetch.enable` pauses every matching request until the debugger
+        // responds with continueRequest or failRequest.  We enable it
+        // unconditionally so the enforcement path is always exercised (simplifies
+        // reasoning about correctness) and disable it again after loadEventFired.
+        //
+        // IMPORTANT: Because Fetch.enable pauses requests, the old "poll
+        // document.readyState" approach no longer works for detecting load
+        // completion — the page can never reach readyState=complete while its
+        // requests are paused.  We instead wait for Page.loadEventFired in the
+        // event pump below and then disable Fetch before handing off to
+        // wait_ready().
+        self.cdp.call("Fetch.enable", json!({
+            "patterns": [{ "urlPattern": "*" }],
+            "handleAuthRequests": false
+        }))?;
+
+        // CRITICAL: Use send_only for Page.navigate, NOT call().
+        //
+        // When Fetch.enable is active, Chrome intercepts the navigation request
+        // itself via Fetch.requestPaused BEFORE sending the Page.navigate
+        // response.  Using call() here causes a deadlock:
+        //   - call() blocks waiting for the Page.navigate response
+        //   - Chrome waits for us to send continueRequest/failRequest first
+        //   - Neither can proceed → 60-second timeout
+        //
+        // send_only() fires the command and returns immediately.  The navigate
+        // response arrives later in the event pump as a regular message with
+        // an `id` field (not a `method` field) and is silently ignored — we
+        // use Page.loadEventFired as the completion signal instead.
+        self.cdp.send_only("Page.navigate", json!({ "url": url }))?;
+
+        // ── Event pump ────────────────────────────────────────────────────────
+        //
+        // Read CDP messages until Page.loadEventFired or the 60 s deadline.
+        // For each Fetch.requestPaused event:
+        //   Allow → Fetch.continueRequest (fire-and-forget via send_only)
+        //   Block → Fetch.failRequest + record URL in blocked_urls
+        //
+        // After Page.loadEventFired we continue the loop for up to 200 ms to
+        // drain any Fetch.requestPaused events that Chrome had already queued.
+        // The drain exits when there are no messages for 200 ms; command
+        // responses to our continueRequest calls (with `id` but no `method`)
+        // are read and silently discarded, allowing the idle window to fill.
+        let load_deadline = Instant::now() + Duration::from_secs(60);
+        let mut page_loaded = false;
+        'pump: loop {
+            if Instant::now() >= load_deadline {
+                // Disable Fetch before returning so subsequent calls aren't stuck.
+                let _ = self.cdp.send_only("Fetch.disable", json!({}));
+                return Err(WkError::Engine(
+                    "timeout waiting for Page.loadEventFired".into()
+                ));
+            }
+
+            // After the page has loaded, use a short drain timeout so we exit
+            // promptly once there are no more pending Fetch events.
+            let poll_ms = if page_loaded { 200 } else { 250 };
+            let Some(msg) = self.cdp.read_message(Duration::from_millis(poll_ms)) else {
+                if page_loaded {
+                    // No message for 200 ms after loadEventFired — all pending
+                    // Fetch.requestPaused events have been handled.
+                    break 'pump;
+                }
+                continue 'pump;
+            };
+
+            match msg.get("method").and_then(|m| m.as_str()) {
+                Some("Fetch.requestPaused") => {
+                    let params = &msg["params"];
+                    let request_id = params["requestId"].as_str().unwrap_or("").to_string();
+                    let req_url = params["request"]["url"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    // A paused response (with responseStatusCode) is a redirect.
+                    let is_redirect = params
+                        .get("responseStatusCode")
+                        .and_then(|c| c.as_u64())
+                        .map(|code| (300..=399).contains(&code))
+                        .unwrap_or(false);
+
+                    match fetch_action(&load.policy, &req_url, is_redirect) {
+                        FetchDecision::Continue => {
+                            self.cdp.send_only(
+                                "Fetch.continueRequest",
+                                json!({ "requestId": request_id }),
+                            )?;
+                        }
+                        FetchDecision::Fail => {
+                            self.blocked_urls.push(req_url);
+                            self.cdp.send_only(
+                                "Fetch.failRequest",
+                                json!({
+                                    "requestId": request_id,
+                                    "errorReason": "Aborted"
+                                }),
+                            )?;
+                        }
+                    }
+                }
+                Some("Page.loadEventFired") => {
+                    page_loaded = true;
+                    // Continue the loop to drain any remaining buffered
+                    // Fetch.requestPaused events (see comment above).
+                }
+                _ => {} // Ignore command responses (id-keyed) and other events.
+            }
+        }
+
+        // Disable Fetch interception so wait_ready()'s Runtime.evaluate calls
+        // are not blocked by paused requests triggered by page JavaScript.
+        // call() is used here (not send_only) so we wait for Chrome to confirm
+        // the disable — any Fetch.requestPaused events arriving during this
+        // call are buffered in msg_buf and handled in the post-disable drain.
+        let _ = self.cdp.call("Fetch.disable", json!({}));
+
+        // Post-disable drain: respond to any Fetch.requestPaused events that
+        // Chrome sent between loadEventFired and our Fetch.disable command.
+        // Chrome may not auto-resume these; ignoring them risks a hang.
+        {
+            let buffered = self.cdp.drain_buffer();
+            for msg in buffered {
+                if msg.get("method").and_then(|m| m.as_str()) != Some("Fetch.requestPaused") {
+                    continue;
+                }
+                let params = &msg["params"];
+                let request_id = params["requestId"].as_str().unwrap_or("").to_string();
+                let req_url = params["request"]["url"].as_str().unwrap_or("").to_string();
+                let is_redirect = params
+                    .get("responseStatusCode")
+                    .and_then(|c| c.as_u64())
+                    .map(|code| (300..=399).contains(&code))
+                    .unwrap_or(false);
+                match fetch_action(&load.policy, &req_url, is_redirect) {
+                    FetchDecision::Continue => {
+                        let _ = self.cdp.send_only(
+                            "Fetch.continueRequest",
+                            json!({ "requestId": request_id }),
+                        );
+                    }
+                    FetchDecision::Fail => {
+                        self.blocked_urls.push(req_url);
+                        let _ = self.cdp.send_only(
+                            "Fetch.failRequest",
+                            json!({ "requestId": request_id, "errorReason": "Aborted" }),
+                        );
+                    }
+                }
+            }
+        }
+
         Ok(PageHandle(1))
     }
 
@@ -353,6 +551,102 @@ impl Renderer for ChromiumRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wkhtmltox_core::policy::ResourcePolicy;
+
+    // ── fetch_action pure unit tests ─────────────────────────────────────────
+
+    #[test]
+    fn fetch_action_allow_maps_to_continue_default() {
+        let policy = ResourcePolicy::default();
+        // Default is permissive: everything is Continue.
+        assert_eq!(
+            fetch_action(&policy, "https://example.com/page.js", false),
+            FetchDecision::Continue,
+        );
+        assert_eq!(
+            fetch_action(&policy, "file:///etc/hosts", false),
+            FetchDecision::Continue,
+            "default policy must not block file://"
+        );
+        assert_eq!(
+            fetch_action(&policy, "http://127.0.0.1/internal", false),
+            FetchDecision::Continue,
+            "default policy must not block private IPs"
+        );
+    }
+
+    #[test]
+    fn fetch_action_block_file_under_safe() {
+        let policy = ResourcePolicy::safe_profile();
+        assert_eq!(
+            fetch_action(&policy, "file:///etc/hosts", false),
+            FetchDecision::Fail,
+            "safe profile must block file://"
+        );
+        assert_eq!(
+            fetch_action(&policy, "file:///etc/passwd", false),
+            FetchDecision::Fail,
+        );
+    }
+
+    #[test]
+    fn fetch_action_block_private_ip_under_safe() {
+        let policy = ResourcePolicy::safe_profile();
+        assert_eq!(
+            fetch_action(&policy, "http://127.0.0.1/", false),
+            FetchDecision::Fail,
+            "safe profile must block loopback IP"
+        );
+        assert_eq!(
+            fetch_action(&policy, "http://169.254.169.254/latest/meta-data/", false),
+            FetchDecision::Fail,
+            "safe profile must block link-local IMDS"
+        );
+        assert_eq!(
+            fetch_action(&policy, "http://10.0.0.5/internal", false),
+            FetchDecision::Fail,
+            "safe profile must block 10/8"
+        );
+    }
+
+    #[test]
+    fn fetch_action_safe_allows_public_https() {
+        let policy = ResourcePolicy::safe_profile();
+        assert_eq!(
+            fetch_action(&policy, "https://example.com/style.css", false),
+            FetchDecision::Continue,
+            "safe profile must allow public HTTPS"
+        );
+    }
+
+    #[test]
+    fn fetch_action_redirect_target_re_validated_under_safe() {
+        let policy = ResourcePolicy::safe_profile();
+        // Redirect to file:// must be blocked even with is_redirect=true.
+        assert_eq!(
+            fetch_action(&policy, "file:///etc/passwd", true),
+            FetchDecision::Fail,
+            "redirect to file:// must be blocked under safe"
+        );
+        // Redirect to private IP is also blocked.
+        assert_eq!(
+            fetch_action(&policy, "http://127.0.0.1/secret", true),
+            FetchDecision::Fail,
+            "redirect to loopback must be blocked under safe"
+        );
+    }
+
+    #[test]
+    fn fetch_action_data_uri_always_allowed() {
+        let policy = ResourcePolicy::safe_profile();
+        assert_eq!(
+            fetch_action(&policy, "data:text/html,<h1>hi</h1>", false),
+            FetchDecision::Continue,
+            "data: URIs are always allowed"
+        );
+    }
+
+    // ── Existing CDP / builder tests ─────────────────────────────────────────
 
     #[test]
     fn cookies_params_json_shape() {

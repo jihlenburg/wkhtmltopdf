@@ -213,6 +213,14 @@ static FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "enable-local-file-access",  short: None, target: Target::Both, action: Action::Const("load.blockLocalFileAccess", "false") },
     FlagSpec { long: "disable-local-file-access", short: None, target: Target::Both, action: Action::Const("load.blockLocalFileAccess", "true")  },
 
+    // ── Security policy ──────────────────────────────────────────────────────
+    // --safe activates the hardened ResourcePolicy (deny file://, block private
+    // IPs).  --allow <path> allows a specific directory prefix even under --safe.
+    FlagSpec { long: "safe",                   short: None, target: Target::Global, action: Action::Const("load.safe", "true")              },
+    FlagSpec { long: "allow",                  short: None, target: Target::Global, action: Action::Setting("load.allowedPath")             },
+    FlagSpec { long: "disable-external-links", short: None, target: Target::Global, action: Action::Const("load.disableExternalLinks", "true") },
+    FlagSpec { long: "disable-internal-links", short: None, target: Target::Global, action: Action::Const("load.disableInternalLinks", "true") },
+
     // ── Header ───────────────────────────────────────────────────────────────
     FlagSpec { long: "header-left",      short: None, target: Target::Both, action: Action::Setting("header.left")     },
     FlagSpec { long: "header-center",    short: None, target: Target::Both, action: Action::Setting("header.center")   },

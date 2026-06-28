@@ -10,7 +10,17 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 type Sock = WebSocket<MaybeTlsStream<TcpStream>>;
 
-pub struct Cdp { sock: Sock, next_id: u64 }
+pub struct Cdp {
+    sock: Sock,
+    next_id: u64,
+    /// Events and unmatched responses buffered while waiting for a command reply.
+    ///
+    /// `call()` discards non-matching messages by pushing them here instead of
+    /// dropping them.  The event pump reads from this buffer first (via
+    /// `read_message`) so `Fetch.requestPaused` events arriving during a `call`
+    /// round-trip are not lost.
+    msg_buf: Vec<serde_json::Value>,
+}
 
 /// Build a CDP request frame. Pure + unit-testable.
 pub fn request_frame(id: u64, method: &str, params: &serde_json::Value) -> String {
@@ -39,6 +49,11 @@ fn is_read_timeout(e: &tungstenite::Error) -> bool {
 }
 
 impl Cdp {
+    /// Send a CDP command and wait for the matching response.
+    ///
+    /// Any events or unmatched responses received while waiting are pushed into
+    /// the internal `msg_buf` so the event pump can process them via
+    /// [`read_message`].
     pub fn call(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
         self.next_id += 1;
         let id = self.next_id;
@@ -61,8 +76,64 @@ impl Cdp {
                 if let Some(res) = parse_response(&t, id) {
                     return res.map_err(WkError::Engine);
                 }
+                // Buffer events and unmatched responses so the event pump sees them.
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
+                    self.msg_buf.push(v);
+                }
             }
         }
+    }
+
+    /// Fire-and-forget: send a CDP command without waiting for the response.
+    ///
+    /// The Chrome response will arrive later and will be buffered or discarded
+    /// by the next call/read_message.  Use this for `Fetch.continueRequest` and
+    /// `Fetch.failRequest` inside the event pump where waiting for a response
+    /// per-request would deadlock.
+    pub fn send_only(&mut self, method: &str, params: serde_json::Value) -> Result<()> {
+        self.next_id += 1;
+        let id = self.next_id;
+        self.sock
+            .send(Message::Text(request_frame(id, method, &params)))
+            .map_err(|e| WkError::Engine(format!("cdp send: {e}")))
+    }
+
+    /// Read one CDP message (event or response), with a timeout.
+    ///
+    /// Drains the internal buffer before reading from the socket, so events
+    /// buffered by `call()` are returned first.  Returns `None` on timeout
+    /// or unrecoverable socket error.
+    pub fn read_message(&mut self, timeout: Duration) -> Option<serde_json::Value> {
+        // Drain internal buffer first.
+        if !self.msg_buf.is_empty() {
+            return Some(self.msg_buf.remove(0));
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            let msg = match self.sock.read() {
+                Ok(m) => m,
+                Err(e) if is_read_timeout(&e) => {
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                    continue;
+                }
+                Err(_) => return None,
+            };
+            if let Message::Text(t) = msg {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
+                    return Some(v);
+                }
+            }
+        }
+    }
+
+    /// Drain all messages currently in the internal buffer and return them.
+    ///
+    /// Used after `Fetch.disable` to process any `Fetch.requestPaused` events
+    /// that Chrome sent while the disable command was in flight.
+    pub fn drain_buffer(&mut self) -> Vec<serde_json::Value> {
+        self.msg_buf.drain(..).collect()
     }
 
     pub fn wait_event(&mut self, method: &str, timeout: Duration) -> Result<serde_json::Value> {
@@ -88,7 +159,7 @@ impl Cdp {
 pub fn connect(ws_url: &str) -> Result<Cdp> {
     let (mut sock, _resp) = ws_connect(ws_url).map_err(|e| WkError::Engine(format!("cdp connect: {e}")))?;
     set_poll_timeout(&mut sock);
-    Ok(Cdp { sock, next_id: 0 })
+    Ok(Cdp { sock, next_id: 0, msg_buf: Vec::new() })
 }
 
 #[cfg(test)]

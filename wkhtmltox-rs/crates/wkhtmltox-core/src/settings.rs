@@ -9,6 +9,7 @@
 
 use crate::assembly::{AssembleOpts, CellText};
 use crate::error::{Result, WkError};
+use crate::policy::ResourcePolicy;
 use crate::render::{Orientation, PageGeometry, Source};
 
 // ---------------------------------------------------------------------------
@@ -262,6 +263,21 @@ pub struct GlobalSettings {
     /// Cover page URL. `None` = no cover.
     pub cover: Option<String>,
 
+    // --- Security policy -----------------------------------------------
+    /// Activate the hardened `--safe` profile.  When `true`, `to_load_settings`
+    /// builds a [`ResourcePolicy`] from [`ResourcePolicy::safe_profile()`] with
+    /// any `--allow` paths applied on top.
+    pub safe_mode: bool,
+    /// Paths that are always permitted even when `allow_local_file_access` is
+    /// `false` or `--safe` is active.  Each entry is matched as a path *prefix*
+    /// against the decoded path component of the URL.
+    pub allowed_paths: Vec<String>,
+    /// Block navigational external hyperlinks (`<a href="…">`).  Does NOT
+    /// affect subresource loading.
+    pub block_external_links: bool,
+    /// Block in-page `#anchor` links.
+    pub block_internal_links: bool,
+
     // --- Internal ------------------------------------------------------
     /// Warnings accumulated for recognised-but-unimplemented settings.
     pub warnings: Vec<String>,
@@ -302,6 +318,10 @@ impl Default for GlobalSettings {
             document_title: String::new(),
             output_path: String::new(),
             cover: None,
+            safe_mode: false,
+            allowed_paths: Vec::new(),
+            block_external_links: false,
+            block_internal_links: false,
             warnings: Vec::new(),
         }
     }
@@ -370,8 +390,32 @@ impl GlobalSettings {
         }
     }
 
-    /// Build a [`crate::render::LoadSettings`] from the global networking fields.
+    /// Build a [`crate::render::LoadSettings`] from the global networking and
+    /// security-policy fields.
+    ///
+    /// When `safe_mode` is `true` the policy starts from
+    /// [`ResourcePolicy::safe_profile()`] (local-file denied, private-IP
+    /// blocked) and then layered with any `allowed_paths` and link flags.
+    /// When `safe_mode` is `false` the policy respects `allow_local_file_access`
+    /// (default `true` — permissive, matching historic wkhtmltopdf behaviour).
     pub fn to_load_settings(&self) -> crate::render::LoadSettings {
+        let policy = if self.safe_mode {
+            ResourcePolicy {
+                allowed_paths: self.allowed_paths.clone(),
+                allow_external_links: !self.block_external_links,
+                allow_internal_links: !self.block_internal_links,
+                ..ResourcePolicy::safe_profile()
+            }
+        } else {
+            ResourcePolicy {
+                allow_local_file: self.allow_local_file_access,
+                allowed_paths: self.allowed_paths.clone(),
+                block_private_ips: false,
+                allow_external_links: !self.block_external_links,
+                allow_internal_links: !self.block_internal_links,
+            }
+        };
+
         crate::render::LoadSettings {
             cookies: self.cookies.clone(),
             custom_headers: self.custom_headers.clone(),
@@ -382,6 +426,7 @@ impl GlobalSettings {
             enable_javascript: self.enable_javascript,
             allow_local_file_access: self.allow_local_file_access,
             compat_ua_css: None,
+            policy,
         }
     }
 }

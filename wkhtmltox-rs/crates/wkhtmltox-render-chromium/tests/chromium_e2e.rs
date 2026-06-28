@@ -1,6 +1,6 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
 use wkhtmltox_core::render::*;
-use wkhtmltox_render_chromium::renderer::ChromiumRenderer;
+use wkhtmltox_render_chromium::renderer::{ChromiumRenderer, FetchDecision, fetch_action};
 
 #[test]
 #[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored"]
@@ -19,6 +19,33 @@ fn renders_paginated_pdf_with_outline() {
     // generateDocumentOutline must yield a catalog /Outlines entry
     let catalog = doc.catalog().expect("catalog");
     assert!(catalog.get(b"Outlines").is_ok(), "no /Outlines (generateDocumentOutline failed)");
+}
+
+/// Verify that the `FetchDecision` enum and `fetch_action` helper are exported
+/// and work correctly — a compile-time smoke test.
+#[test]
+fn fetch_action_exported_and_correct() {
+    use wkhtmltox_core::policy::ResourcePolicy;
+    // Default policy: permissive → Continue.
+    assert_eq!(
+        fetch_action(&ResourcePolicy::default(), "file:///etc/hosts", false),
+        FetchDecision::Continue
+    );
+    // Safe profile: local file → Fail.
+    assert_eq!(
+        fetch_action(&ResourcePolicy::safe_profile(), "file:///etc/hosts", false),
+        FetchDecision::Fail
+    );
+    // Safe profile: private IP → Fail.
+    assert_eq!(
+        fetch_action(&ResourcePolicy::safe_profile(), "http://127.0.0.1:1/", false),
+        FetchDecision::Fail
+    );
+    // Safe profile: public HTTPS → Continue.
+    assert_eq!(
+        fetch_action(&ResourcePolicy::safe_profile(), "https://example.com/", false),
+        FetchDecision::Continue
+    );
 }
 
 #[test]
@@ -46,4 +73,115 @@ fn networking_settings_accepted_headers_and_auth() {
     r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready must succeed");
     let pdf = r.print_pdf(p, &PageGeometry::default()).expect("print_pdf must succeed");
     assert!(pdf.starts_with(b"%PDF"), "output must be a valid PDF");
+}
+
+/// Verify that ResourcePolicy is enforced via CDP Fetch interception.
+///
+/// The test creates a temp HTML file that references two subresources:
+///   1. `file:///etc/hosts`   — local file access (blocked by safe profile)
+///   2. `http://127.0.0.1:1/nonexistent` — private/loopback IP (blocked by safe profile)
+///
+/// Under the DEFAULT policy both are allowed through (permissive) and do NOT
+/// appear in `blocked_urls`.
+///
+/// Under a SAFE-EQUIVALENT policy (allow_local_file=false, block_private_ips=true)
+/// both appear in `blocked_urls` and the page still renders to `%PDF`.
+///
+/// # Note on allowed_paths
+/// The safe-equivalent policy includes the temp file's own path in
+/// `allowed_paths` so the main page can load.  This mirrors real-world usage:
+///   `wkhtmltopdf --safe --allow /path/to/my-report.html my-report.html out.pdf`
+/// The subresources (`/etc/hosts`, `127.0.0.1`) are NOT in allowed_paths.
+#[test]
+#[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored"]
+fn policy_enforcement_blocks_ssrf_and_local_files() {
+    use std::io::Write as _;
+    use wkhtmltox_core::policy::ResourcePolicy;
+
+    // Write a temp HTML page that tries to load two policy-blocked resources.
+    let mut tmp = tempfile::Builder::new()
+        .prefix("wkx-policy-test-")
+        .suffix(".html")
+        .tempfile()
+        .expect("create temp html file");
+    writeln!(
+        tmp,
+        r#"<!DOCTYPE html>
+<html>
+<head><title>Policy Enforcement Test</title></head>
+<body>
+<img src="file:///etc/hosts" alt="local-file">
+<img src="http://127.0.0.1:1/nonexistent" alt="private-ip">
+<p>ResourcePolicy enforcement test</p>
+</body>
+</html>"#
+    ).expect("write html");
+    tmp.flush().expect("flush");
+    let main_path = tmp.path().to_str().expect("utf8 path").to_string();
+    let main_url  = format!("file://{main_path}");
+
+    // ── Default (permissive) policy ──────────────────────────────────────────
+    {
+        let mut r = ChromiumRenderer::spawn().expect("spawn chrome [default policy]");
+        let load = LoadSettings {
+            enable_javascript: true,
+            allow_local_file_access: true,
+            policy: ResourcePolicy::default(),
+            ..Default::default()
+        };
+        let p = r.open(&Source::Url(main_url.clone()), &load)
+            .expect("open [default policy]");
+        r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready [default policy]");
+        let pdf = r.print_pdf(p, &PageGeometry::default())
+            .expect("print_pdf [default policy]");
+
+        assert!(pdf.starts_with(b"%PDF"), "default policy: output must be PDF");
+
+        let blocked = r.blocked_urls();
+        assert!(
+            !blocked.iter().any(|u| u.contains("/etc/hosts")),
+            "default policy must NOT block file:///etc/hosts; blocked_urls={blocked:?}"
+        );
+        assert!(
+            !blocked.iter().any(|u| u.contains("127.0.0.1")),
+            "default policy must NOT block http://127.0.0.1:1/; blocked_urls={blocked:?}"
+        );
+    }
+
+    // ── Safe-equivalent policy ────────────────────────────────────────────────
+    // Allow only the main test file; block all other local files + private IPs.
+    {
+        let mut r = ChromiumRenderer::spawn().expect("spawn chrome [safe policy]");
+        let policy = ResourcePolicy {
+            allow_local_file: false,
+            // The main HTML file is explicitly allowed; /etc/hosts is not.
+            allowed_paths: vec![main_path.clone()],
+            block_private_ips: true,
+            allow_external_links: true,
+            allow_internal_links: true,
+        };
+        let load = LoadSettings {
+            enable_javascript: true,
+            allow_local_file_access: false,
+            policy,
+            ..Default::default()
+        };
+        let p = r.open(&Source::Url(main_url.clone()), &load)
+            .expect("open [safe policy]");
+        r.wait_ready(p, &ReadyPolicy::default()).expect("wait_ready [safe policy]");
+        let pdf = r.print_pdf(p, &PageGeometry::default())
+            .expect("print_pdf [safe policy]");
+
+        assert!(pdf.starts_with(b"%PDF"), "safe policy: output must still be PDF");
+
+        let blocked = r.blocked_urls();
+        assert!(
+            blocked.iter().any(|u| u.contains("/etc/hosts")),
+            "safe policy must block file:///etc/hosts; blocked_urls={blocked:?}"
+        );
+        assert!(
+            blocked.iter().any(|u| u.contains("127.0.0.1")),
+            "safe policy must block http://127.0.0.1:1/nonexistent; blocked_urls={blocked:?}"
+        );
+    }
 }

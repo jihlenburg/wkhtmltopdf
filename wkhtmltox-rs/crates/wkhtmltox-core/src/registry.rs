@@ -121,6 +121,17 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
         "load.username" => g.username = value.to_string(),
         "load.password" => g.password = value.to_string(),
 
+        // ── Security policy ───────────────────────────────────────────────
+        "load.safe" => g.safe_mode = parse_bool(value)?,
+        // Repeatable: each call appends one allowed path prefix.
+        "load.allowedPath" => {
+            if !value.is_empty() {
+                g.allowed_paths.push(value.to_string());
+            }
+        }
+        "load.disableExternalLinks" => g.block_external_links = parse_bool(value)?,
+        "load.disableInternalLinks" => g.block_internal_links = parse_bool(value)?,
+
         // ── header ────────────────────────────────────────────────────────
         "header.left" => g.header.left = value.to_string(),
         "header.center" => g.header.center = value.to_string(),
@@ -387,6 +398,12 @@ pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
         "load.blockLocalFileAccess" => (!g.allow_local_file_access).to_string(),
         "load.username" => g.username.clone(),
         "load.password" => g.password.clone(),
+
+        // ── Security policy ───────────────────────────────────────────────
+        "load.safe" => g.safe_mode.to_string(),
+        "load.allowedPath" => g.allowed_paths.join(","),
+        "load.disableExternalLinks" => g.block_external_links.to_string(),
+        "load.disableInternalLinks" => g.block_internal_links.to_string(),
 
         // ── header ────────────────────────────────────────────────────────
         "header.left" => g.header.left.clone(),
