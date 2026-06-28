@@ -1,0 +1,6 @@
+{
+  "mean_ssim": 0.68,
+  "outline_ratio": 0.95,
+  "text_sim": 0.90,
+  "max_abs_delta_pages": 3
+}

@@ -81,7 +81,21 @@ parser.add_argument(
     help="Run M5 image comparison: our wkhtmltoimage binary vs oracle "
          "(dimensions + SSIM on PNG output).",
 )
-ARGS = parser.parse_args()
+parser.add_argument(
+    "--gate",
+    action="store_true",
+    default=False,
+    help="After the corpus sweep, check aggregate metrics against thresholds and "
+         "exit 1 if any metric falls below its floor (requires --thresholds file).",
+)
+parser.add_argument(
+    "--thresholds",
+    metavar="PATH",
+    default=None,
+    help="Path to a JSON thresholds file (default: tests/compat/thresholds.json). "
+         "Used only when --gate is specified.",
+)
+ARGS = parser.parse_known_args()[0]
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -229,6 +243,60 @@ def outline_match(ref_toc, new_toc) -> tuple[int, int, float]:
     return ref_n, new_n, ratio
 
 
+def outline_tree_ratio(ref_toc, new_toc) -> float:
+    """Ordered similarity of two outlines as (level, title) sequences.
+
+    Unlike outline_match (set intersection), this respects order and nesting:
+    a reordered or re-nested outline scores below 1.0.  Uses difflib's
+    longest-contiguous-matching-blocks ratio over the (level, title) tuples.
+    """
+    ref_seq = [(lvl, (title or "").strip()) for lvl, title, *_ in ref_toc]
+    new_seq = [(lvl, (title or "").strip()) for lvl, title, *_ in new_toc]
+    if not ref_seq and not new_seq:
+        return 1.0
+    if not ref_seq or not new_seq:
+        return 0.0
+    return difflib.SequenceMatcher(None, ref_seq, new_seq).ratio()
+
+
+def extract_body_text(doc, top_pt: float = 36.0, bottom_pt: float = 36.0,
+                      skip_toc: bool = False) -> str:
+    """Concatenated page text EXCLUDING the top/bottom margin bands (where
+    running headers/footers live) and, optionally, a leading TOC page.
+
+    Header/footer chrome and TOC formatting were the dominant source of the
+    low M2b text_sim despite matching body content; clipping the margin bands
+    and the TOC page isolates the body for a fair comparison.
+    """
+    parts = []
+    start = 1 if (skip_toc and doc.page_count > 1) else 0
+    for i in range(start, doc.page_count):
+        page = doc[i]
+        r = page.rect
+        body = fitz.Rect(r.x0, r.y0 + top_pt, r.x1, r.y1 - bottom_pt)
+        parts.append(page.get_text("text", clip=body))
+    return " ".join(parts)
+
+
+def gate_check(metrics: dict, thresholds: dict) -> list:
+    """Return a list of human-readable failure strings; empty list == pass.
+
+    Recognised threshold keys: mean_ssim (floor), outline_ratio (floor),
+    text_sim (floor), max_abs_delta_pages (ceiling on |pages_new-pages_ref|).
+    Only keys present in `thresholds` are enforced.
+    """
+    fails = []
+    for key in ("mean_ssim", "outline_ratio", "text_sim"):
+        if key in thresholds and key in metrics and metrics[key] < thresholds[key]:
+            fails.append(f"{key}={metrics[key]:.4f} < floor {thresholds[key]:.4f}")
+    if "max_abs_delta_pages" in thresholds and "abs_delta_pages" in metrics:
+        if metrics["abs_delta_pages"] > thresholds["max_abs_delta_pages"]:
+            fails.append(
+                f"abs_delta_pages={metrics['abs_delta_pages']} > "
+                f"ceiling {thresholds['max_abs_delta_pages']}")
+    return fails
+
+
 def page_to_gray_array(page: fitz.Page, dpi: int = 100) -> np.ndarray:
     """Rasterize a PDF page to a grayscale uint8 numpy array."""
     mat = fitz.Matrix(dpi / 72, dpi / 72)
@@ -286,7 +354,7 @@ def visual_metrics(ref_doc: fitz.Document, new_doc: fitz.Document, dpi: int = 10
 # Main measurement loop
 # ---------------------------------------------------------------------------
 
-def measure_file(html_path: Path) -> dict:
+def measure_file(html_path: Path, skip_toc: bool = False) -> dict:
     name = html_path.stem
     ref_pdf = OUT_DIR / f"{name}.ref.pdf"
     new_pdf = OUT_DIR / f"{name}.new.pdf"
@@ -338,7 +406,13 @@ def measure_file(html_path: Path) -> dict:
         # outline
         toc_ref = ref_doc.get_toc()
         toc_new = new_doc.get_toc()
-        outline_ref_n, outline_new_n, outline_ratio = outline_match(toc_ref, toc_new)
+        outline_ref_n, outline_new_n, _set_ratio = outline_match(toc_ref, toc_new)
+        outline_ratio = outline_tree_ratio(toc_ref, toc_new)
+
+        # body text similarity (excludes header/footer margin bands and optional TOC page)
+        body_text_ref = extract_body_text(ref_doc, skip_toc=skip_toc)
+        body_text_new = extract_body_text(new_doc, skip_toc=skip_toc)
+        body_text_sim = text_similarity(body_text_ref, body_text_new)
 
         # visual
         mean_ssim, min_ssim, pixel_diff_pct = visual_metrics(ref_doc, new_doc, dpi=100)
@@ -359,6 +433,7 @@ def measure_file(html_path: Path) -> dict:
         "pages_new": pages_new,
         "delta_pages": delta_pages,
         "text_sim": round(text_sim, 4),
+        "body_text_sim": round(body_text_sim, 4),
         "outline_ref": outline_ref_n,
         "outline_new": outline_new_n,
         "outline_ratio": round(outline_ratio, 4),
@@ -379,7 +454,7 @@ def fmt_row(r: dict) -> str:
     if status != "OK":
         err_short = (r.get("error") or "")[:50]
         return (
-            f"| {r['name']:<28} | {status:<13} | -- | -- |  +0 | ------- | ------------- "
+            f"| {r['name']:<28} | {status:<13} | -- | -- |  +0 | ------- | ------- | ------------- "
             f"| ----- | ----- | ----- | {err_short} |"
         )
     return (
@@ -389,6 +464,7 @@ def fmt_row(r: dict) -> str:
         f"| {r['pages_new']:>2} "
         f"| {r['delta_pages']:>+3} "
         f"| {r['text_sim']:.4f}  "
+        f"| {r['body_text_sim']:.4f}  "
         f"| {r['outline_ref']:>2}/{r['outline_new']:<2} ({r['outline_ratio']:.2f}) "
         f"| {r['mean_ssim']:.4f} "
         f"| {r['min_ssim']:.4f} "
@@ -398,10 +474,10 @@ def fmt_row(r: dict) -> str:
 
 
 HEADER = (
-    "| Document                     | status        | p_ref | p_new |  Δp | text_sim | outline ref/new | mean_ssim | min_ssim | px_diff% | score  |"
+    "| Document                     | status        | p_ref | p_new |  Δp | text_sim | body_sim | outline ref/new | mean_ssim | min_ssim | px_diff% | score  |"
 )
 SEPARATOR = (
-    "|:-----------------------------|:--------------|------:|------:|----:|---------:|:----------------|----------:|---------:|---------:|-------:|"
+    "|:-----------------------------|:--------------|------:|------:|----:|---------:|---------:|:----------------|----------:|---------:|---------:|-------:|"
 )
 
 
@@ -421,11 +497,14 @@ def aggregate(results: list[dict]) -> dict:
         "n_ok": len(ok),
         "n_errors": len(errors),
         "mean_text_sim": round(float(np.mean([r["text_sim"] for r in ok])), 4),
+        "mean_body_text_sim": round(float(np.mean([r["body_text_sim"] for r in ok])), 4),
+        "min_outline_ratio": round(float(np.min([r["outline_ratio"] for r in ok])), 4),
         "mean_ssim": round(float(np.mean([r["mean_ssim"] for r in ok])), 4),
         "min_ssim_overall": round(float(np.min([r["min_ssim"] for r in ok])), 4),
         "mean_pixel_diff_pct": round(float(np.mean([r["pixel_diff_pct"] for r in ok])), 3),
         "mean_score": round(float(np.mean([r["score"] for r in ok])), 4),
         "total_page_delta": int(np.sum([abs(r["delta_pages"]) for r in ok])),
+        "max_abs_delta_pages": int(np.max([abs(r["delta_pages"]) for r in ok])),
     }
 
 
@@ -1759,11 +1838,14 @@ def main():
     agg_row = (
         f"\n**Aggregate ({agg.get('n_ok',0)} OK / {agg.get('n_errors',0)} errors)**: "
         f"mean_text_sim={agg.get('mean_text_sim','n/a')}  "
+        f"mean_body_text_sim={agg.get('mean_body_text_sim','n/a')}  "
+        f"min_outline_ratio={agg.get('min_outline_ratio','n/a')}  "
         f"mean_ssim={agg.get('mean_ssim','n/a')}  "
         f"min_ssim_overall={agg.get('min_ssim_overall','n/a')}  "
         f"mean_px_diff={agg.get('mean_pixel_diff_pct','n/a')}%  "
         f"mean_score={agg.get('mean_score','n/a')}  "
-        f"total_|Δpages|={agg.get('total_page_delta','n/a')}"
+        f"total_|Δpages|={agg.get('total_page_delta','n/a')}  "
+        f"max_|Δpages|={agg.get('max_abs_delta_pages','n/a')}"
     )
 
     print()
@@ -1791,7 +1873,8 @@ def main():
         - **p_ref / p_new**: page count from oracle / new engine
         - **Δp**: page count difference (new − ref)
         - **text_sim**: SequenceMatcher ratio on whitespace-normalised extracted text (0=none, 1=identical)
-        - **outline ref/new**: TOC entry count; ratio = intersection / max
+        - **body_sim**: SequenceMatcher ratio on body-only text (margin bands + optional TOC page excluded)
+        - **outline ref/new**: TOC entry count; ratio = ordered LCS ratio (respects order and nesting)
         - **mean_ssim / min_ssim**: structural similarity over matched pages (1=identical)
         - **px_diff%**: mean absolute pixel difference / 255 × 100 over matched pages
         - **score**: (text_sim + mean_ssim + page_count_closeness) / 3
@@ -1806,6 +1889,38 @@ def main():
         encoding="utf-8",
     )
     print(f"Wrote {results_json}")
+
+    # --- gate check (only when --gate is passed) ---
+    if ARGS.gate:
+        thresholds_path = Path(
+            ARGS.thresholds if ARGS.thresholds else (SCRIPT_DIR / "thresholds.json")
+        )
+        try:
+            with open(thresholds_path) as _tf:
+                thresholds = json.load(_tf)
+        except FileNotFoundError:
+            print(f"GATE ERROR: thresholds file not found: {thresholds_path}", file=sys.stderr)
+            sys.exit(2)
+
+        ok_results = [r for r in results if r.get("status") == "OK"]
+        if ok_results:
+            gate_metrics = {
+                "mean_ssim": agg.get("mean_ssim", 0.0),
+                "outline_ratio": agg.get("min_outline_ratio", 0.0),
+                "abs_delta_pages": agg.get("max_abs_delta_pages", 0),
+                "text_sim": agg.get("mean_body_text_sim", 0.0),
+            }
+            failures = gate_check(gate_metrics, thresholds)
+            if failures:
+                print()
+                for msg in failures:
+                    print(f"GATE FAIL: {msg}")
+                sys.exit(1)
+            else:
+                print("\nGATE: PASS")
+        else:
+            print("\nGATE: no OK results to evaluate", file=sys.stderr)
+            sys.exit(2)
 
 
 if __name__ == "__main__":
