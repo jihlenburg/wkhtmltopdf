@@ -149,6 +149,19 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
                 .map_err(|_| WkError::BadArg(format!("invalid header.fontSize: {value:?}")))?;
         }
         "header.line" => g.header.line = parse_bool(value)?,
+        "header.htmlUrl" => {
+            g.header_html_url = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+        }
+        "header.spacing" => {
+            g.header_spacing = value
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| WkError::BadArg(format!("invalid header.spacing: {value:?}")))?;
+        }
 
         // ── footer ────────────────────────────────────────────────────────
         "footer.left" => g.footer.left = value.to_string(),
@@ -161,6 +174,19 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
                 .map_err(|_| WkError::BadArg(format!("invalid footer.fontSize: {value:?}")))?;
         }
         "footer.line" => g.footer.line = parse_bool(value)?,
+        "footer.htmlUrl" => {
+            g.footer_html_url = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+        }
+        "footer.spacing" => {
+            g.footer_spacing = value
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| WkError::BadArg(format!("invalid footer.spacing: {value:?}")))?;
+        }
 
         // ── document structure ────────────────────────────────────────────
         "toc" => g.produce_toc = parse_bool(value)?,
@@ -234,12 +260,8 @@ pub fn set_global(g: &mut GlobalSettings, name: &str, value: &str) -> Result<()>
         | "web.userStyleSheet"
         | "web.enablePlugins"
         | "web.loadImages"
-        | "header.htmlUrl"
         | "header.fontName"
-        | "header.spacing"
-        | "footer.htmlUrl"
-        | "footer.fontName"
-        | "footer.spacing" => {
+        | "footer.fontName" => {
             g.warnings.push(format!(
                 "setting {name:?} is recognised but not yet implemented in this engine; ignored"
             ));
@@ -303,6 +325,19 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
                 .map_err(|_| WkError::BadArg(format!("invalid header.fontSize: {value:?}")))?;
         }
         "header.line" => o.header.line = parse_bool(value)?,
+        "header.htmlUrl" => {
+            o.header_html_url = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+        }
+        "header.spacing" => {
+            o.header_spacing = value
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| WkError::BadArg(format!("invalid header.spacing: {value:?}")))?;
+        }
 
         // ── footer ────────────────────────────────────────────────────────
         "footer.left" => o.footer.left = value.to_string(),
@@ -315,6 +350,33 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
                 .map_err(|_| WkError::BadArg(format!("invalid footer.fontSize: {value:?}")))?;
         }
         "footer.line" => o.footer.line = parse_bool(value)?,
+        "footer.htmlUrl" => {
+            o.footer_html_url = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+        }
+        "footer.spacing" => {
+            o.footer_spacing = value
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| WkError::BadArg(format!("invalid footer.spacing: {value:?}")))?;
+        }
+
+        // ── replacements ─────────────────────────────────────────────────
+        // TwoArg format from the CLI: "name=value"; accumulated as a list.
+        "replacements" => {
+            if let Some(eq) = value.find('=') {
+                let k = value[..eq].to_string();
+                let v = value[eq + 1..].to_string();
+                o.replacements.push((k, v));
+            } else if !value.is_empty() {
+                return Err(WkError::BadArg(format!(
+                    "invalid replacements format: {value:?} (expected name=value)"
+                )));
+            }
+        }
 
         // ── structural flags ──────────────────────────────────────────────
         "includeInOutline" => o.include_in_outline = parse_bool(value)?,
@@ -333,7 +395,6 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
         // ── Recognised-but-unimplemented ──────────────────────────────────
         "useExternalLinks"
         | "useLocalLinks"
-        | "replacements"
         | "tocXsl"
         | "load.proxy"
         | "load.cookieJar"
@@ -357,12 +418,8 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
         | "web.userStyleSheet"
         | "web.enablePlugins"
         | "web.loadImages"
-        | "header.htmlUrl"
         | "header.fontName"
-        | "header.spacing"
-        | "footer.htmlUrl"
-        | "footer.fontName"
-        | "footer.spacing" => {
+        | "footer.fontName" => {
             o.warnings.push(format!(
                 "setting {name:?} is recognised but not yet implemented in this engine; ignored"
             ));
@@ -444,6 +501,8 @@ pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
         "header.right" => g.header.right.clone(),
         "header.fontSize" => g.header.font_size.to_string(),
         "header.line" => g.header.line.to_string(),
+        "header.htmlUrl" => g.header_html_url.clone().unwrap_or_default(),
+        "header.spacing" => g.header_spacing.to_string(),
 
         // ── footer ────────────────────────────────────────────────────────
         "footer.left" => g.footer.left.clone(),
@@ -451,6 +510,8 @@ pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
         "footer.right" => g.footer.right.clone(),
         "footer.fontSize" => g.footer.font_size.to_string(),
         "footer.line" => g.footer.line.to_string(),
+        "footer.htmlUrl" => g.footer_html_url.clone().unwrap_or_default(),
+        "footer.spacing" => g.footer_spacing.to_string(),
 
         // ── document structure ────────────────────────────────────────────
         "toc" => g.produce_toc.to_string(),
@@ -489,12 +550,8 @@ pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
         | "web.userStyleSheet"
         | "web.enablePlugins"
         | "web.loadImages"
-        | "header.htmlUrl"
         | "header.fontName"
-        | "header.spacing"
-        | "footer.htmlUrl"
-        | "footer.fontName"
-        | "footer.spacing" => String::new(),
+        | "footer.fontName" => String::new(),
 
         // ── unknown ───────────────────────────────────────────────────────
         _ => return None,
@@ -527,6 +584,8 @@ pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
         "header.right" => o.header.right.clone(),
         "header.fontSize" => o.header.font_size.to_string(),
         "header.line" => o.header.line.to_string(),
+        "header.htmlUrl" => o.header_html_url.clone().unwrap_or_default(),
+        "header.spacing" => o.header_spacing.to_string(),
 
         // ── footer ────────────────────────────────────────────────────────
         "footer.left" => o.footer.left.clone(),
@@ -534,6 +593,11 @@ pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
         "footer.right" => o.footer.right.clone(),
         "footer.fontSize" => o.footer.font_size.to_string(),
         "footer.line" => o.footer.line.to_string(),
+        "footer.htmlUrl" => o.footer_html_url.clone().unwrap_or_default(),
+        "footer.spacing" => o.footer_spacing.to_string(),
+
+        // ── replacements ─────────────────────────────────────────────────
+        "replacements" => String::new(), // list type; no canonical single-string repr
 
         // ── structural flags ──────────────────────────────────────────────
         "includeInOutline" => o.include_in_outline.to_string(),
@@ -550,7 +614,6 @@ pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
         | "toc.fontScale"
         | "useExternalLinks"
         | "useLocalLinks"
-        | "replacements"
         | "tocXsl"
         | "load.proxy"
         | "load.cookieJar"
@@ -574,12 +637,8 @@ pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
         | "web.userStyleSheet"
         | "web.enablePlugins"
         | "web.loadImages"
-        | "header.htmlUrl"
         | "header.fontName"
-        | "header.spacing"
-        | "footer.htmlUrl"
-        | "footer.fontName"
-        | "footer.spacing" => String::new(),
+        | "footer.fontName" => String::new(),
 
         // ── unknown ───────────────────────────────────────────────────────
         _ => return None,
@@ -1191,6 +1250,87 @@ mod tests {
         let mut g = GlobalSettings::default();
         let err = set_global(&mut g, "toc.fontScale", "notanumber").unwrap_err();
         assert!(matches!(err, WkError::BadArg(_)));
+    }
+
+    // ── HTML header/footer registry wiring (Task 4) ───────────────────────────
+
+    /// `header.htmlUrl` stores and flows into `AssembleOpts.header_html`.
+    #[test]
+    fn header_html_url_lands_in_assemble_opts() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "header.htmlUrl", "h.html").unwrap();
+        assert!(
+            g.warnings.is_empty(),
+            "no warnings expected for header.htmlUrl; got: {:?}",
+            g.warnings
+        );
+        assert_eq!(g.header_html_url, Some("h.html".to_owned()));
+        let opts = g.to_assemble_opts();
+        assert_eq!(
+            opts.header_html,
+            Some("h.html".to_owned()),
+            "header_html should be forwarded to AssembleOpts"
+        );
+    }
+
+    /// `header.spacing` parses and flows into `AssembleOpts.header_spacing_mm`.
+    #[test]
+    fn header_spacing_lands_in_assemble_opts() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "header.spacing", "5").unwrap();
+        assert!(
+            g.warnings.is_empty(),
+            "no warnings expected for header.spacing; got: {:?}",
+            g.warnings
+        );
+        assert!(
+            (g.header_spacing - 5.0).abs() < 1e-9,
+            "header_spacing should be 5.0"
+        );
+        let opts = g.to_assemble_opts();
+        assert!(
+            (opts.header_spacing_mm - 5.0).abs() < 1e-9,
+            "AssembleOpts.header_spacing_mm should be 5.0"
+        );
+    }
+
+    /// `footer.htmlUrl` stores and get_global round-trips it.
+    #[test]
+    fn footer_html_url_roundtrip() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "footer.htmlUrl", "f.html").unwrap();
+        assert!(g.warnings.is_empty());
+        assert_eq!(
+            get_global(&g, "footer.htmlUrl"),
+            Some("f.html".to_owned())
+        );
+        let opts = g.to_assemble_opts();
+        assert_eq!(opts.footer_html, Some("f.html".to_owned()));
+    }
+
+    /// Empty `header.htmlUrl` clears the URL.
+    #[test]
+    fn header_html_url_empty_clears() {
+        let mut g = GlobalSettings::default();
+        g.header_html_url = Some("old.html".into());
+        set_global(&mut g, "header.htmlUrl", "").unwrap();
+        assert!(g.header_html_url.is_none());
+    }
+
+    /// `replacements` in set_object parses `name=value` and appends the pair.
+    #[test]
+    fn object_replacements_parsed_and_stored() {
+        let mut o = PdfObjectSettings::default();
+        set_object(&mut o, "replacements", "foo=bar").unwrap();
+        assert!(o.warnings.is_empty(), "no warnings expected");
+        assert_eq!(
+            o.replacements,
+            vec![("foo".to_owned(), "bar".to_owned())]
+        );
+        // A second replacement is appended.
+        set_object(&mut o, "replacements", "x=y").unwrap();
+        assert_eq!(o.replacements.len(), 2);
+        assert_eq!(o.replacements[1], ("x".to_owned(), "y".to_owned()));
     }
 
     /// take_warnings drains the list.

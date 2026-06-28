@@ -491,6 +491,12 @@ static FLAGS: &[FlagSpec] = &[
         target: Target::Both,
         action: Action::Setting("header.spacing"),
     },
+    FlagSpec {
+        long: "header-html",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("header.htmlUrl"),
+    },
     // ── Footer ───────────────────────────────────────────────────────────────
     FlagSpec {
         long: "footer-left",
@@ -533,6 +539,12 @@ static FLAGS: &[FlagSpec] = &[
         short: None,
         target: Target::Both,
         action: Action::Setting("footer.spacing"),
+    },
+    FlagSpec {
+        long: "footer-html",
+        short: None,
+        target: Target::Both,
+        action: Action::Setting("footer.htmlUrl"),
     },
     // ── Two-argument repeatables ─────────────────────────────────────────────
     FlagSpec {
@@ -1512,5 +1524,55 @@ mod tests {
         let inv = parse(&args(&["p.html", "--dump-outline", "outline.xml", "out.pdf"]))
             .expect("should parse");
         assert_eq!(inv.dump_outline, Some("outline.xml".to_owned()));
+    }
+
+    // ── HTML header/footer + replace flags (Task 4) ───────────────────────────
+
+    /// `--header-html <url>` is accepted and stored (not "unknown option").
+    #[test]
+    fn header_html_flag_is_accepted() {
+        let inv = parse(&args(&["--header-html", "h.html", "in.html", "out.pdf"]))
+            .expect("--header-html should parse without error");
+        assert_eq!(
+            inv.global.header_html_url,
+            Some("h.html".to_owned()),
+            "header_html_url should be set on global"
+        );
+    }
+
+    /// `--footer-html <url>` is accepted and stored (not "unknown option").
+    #[test]
+    fn footer_html_flag_is_accepted() {
+        let inv = parse(&args(&["--footer-html", "f.html", "in.html", "out.pdf"]))
+            .expect("--footer-html should parse without error");
+        assert_eq!(
+            inv.global.footer_html_url,
+            Some("f.html".to_owned()),
+            "footer_html_url should be set on global"
+        );
+    }
+
+    /// `--replace name value` (two-arg) parses into a `(name, value)` pair on the object.
+    #[test]
+    fn replace_two_arg_parses_into_pair() {
+        let inv = parse(&args(&["--replace", "a", "b", "in.html", "out.pdf"]))
+            .expect("--replace should parse without error");
+        assert_eq!(inv.objects.len(), 1);
+        assert_eq!(
+            inv.objects[0].0.replacements,
+            vec![("a".to_owned(), "b".to_owned())],
+            "--replace a b should produce a single (a, b) pair on the object"
+        );
+    }
+
+    /// `--header-spacing <real>` stores the spacing on global (leading phase).
+    #[test]
+    fn header_spacing_flag_is_accepted() {
+        let inv = parse(&args(&["--header-spacing", "5", "in.html", "out.pdf"]))
+            .expect("--header-spacing should parse without error");
+        assert!(
+            (inv.global.header_spacing - 5.0).abs() < 1e-9,
+            "global.header_spacing should be 5.0"
+        );
     }
 }

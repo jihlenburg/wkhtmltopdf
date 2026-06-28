@@ -249,6 +249,21 @@ pub struct GlobalSettings {
     pub header: HeaderFooterSettings,
     pub footer: HeaderFooterSettings,
 
+    // --- HTML header / footer (Milestone 10, Task 4) -------------------
+    /// HTML header URL (`header.htmlUrl`).  `None` = no HTML header.
+    pub header_html_url: Option<String>,
+    /// HTML footer URL (`footer.htmlUrl`).  `None` = no HTML footer.
+    pub footer_html_url: Option<String>,
+    /// Spacing (mm) between the HTML header band and the content area
+    /// (`header.spacing`).  Default 0.0.
+    pub header_spacing: f64,
+    /// Spacing (mm) between the content area and the HTML footer band
+    /// (`footer.spacing`).  Default 0.0.
+    pub footer_spacing: f64,
+    /// `--replace name value` substitution pairs forwarded to the HTML
+    /// header/footer query string on every page.
+    pub replacements: Vec<(String, String)>,
+
     // --- Document structure --------------------------------------------
     /// Prepend a Table of Contents page (default false).
     pub produce_toc: bool,
@@ -323,6 +338,11 @@ impl Default for GlobalSettings {
             custom_headers: Vec::new(),
             header: HeaderFooterSettings::default(),
             footer: HeaderFooterSettings::default(),
+            header_html_url: None,
+            footer_html_url: None,
+            header_spacing: 0.0,
+            footer_spacing: 0.0,
+            replacements: Vec::new(),
             produce_toc: false,
             produce_forms: false,
             produce_outline: true,
@@ -401,12 +421,12 @@ impl GlobalSettings {
             load: self.to_load_settings(),
             toc_xsl: self.toc_xsl.clone(),
             toc_settings: self.toc_settings.clone(),
-            // HTML header/footer fields — wired in Task 4; zero/None defaults here.
-            header_html: None,
-            footer_html: None,
-            header_spacing_mm: 0.0,
-            footer_spacing_mm: 0.0,
-            replacements: Vec::new(),
+            // HTML header/footer fields — wired in Task 4.
+            header_html: self.header_html_url.clone(),
+            footer_html: self.footer_html_url.clone(),
+            header_spacing_mm: self.header_spacing,
+            footer_spacing_mm: self.footer_spacing,
+            replacements: self.replacements.clone(),
             date: String::new(),
             isodate: String::new(),
             time: String::new(),
@@ -491,6 +511,19 @@ pub struct PdfObjectSettings {
     pub header: HeaderFooterSettings,
     pub footer: HeaderFooterSettings,
 
+    // --- HTML header / footer (Milestone 10, Task 4) -------------------
+    /// HTML header URL (`header.htmlUrl`).
+    pub header_html_url: Option<String>,
+    /// HTML footer URL (`footer.htmlUrl`).
+    pub footer_html_url: Option<String>,
+    /// Spacing (mm) between the HTML header band and the content area.
+    pub header_spacing: f64,
+    /// Spacing (mm) between the content area and the HTML footer band.
+    pub footer_spacing: f64,
+    /// `--replace name value` substitution pairs for this object's HTML
+    /// header/footer.
+    pub replacements: Vec<(String, String)>,
+
     // --- Structural flags ---
     pub include_in_outline: bool,
     pub pages_count: bool,
@@ -518,6 +551,11 @@ impl Default for PdfObjectSettings {
             password: String::new(),
             header: HeaderFooterSettings::default(),
             footer: HeaderFooterSettings::default(),
+            header_html_url: None,
+            footer_html_url: None,
+            header_spacing: 0.0,
+            footer_spacing: 0.0,
+            replacements: Vec::new(),
             include_in_outline: true,
             pages_count: true,
             is_table_of_content: false,
