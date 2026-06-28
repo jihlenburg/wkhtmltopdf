@@ -91,9 +91,12 @@ hit LOW "security-relevant TODO/FIXME" "$TODO"
 # --- Dependency advisories (cargo-audit if present) ---
 say ""; say "### Dependency advisories"
 if command -v cargo-audit >/dev/null 2>&1; then
-  AUD="$(cd "$SCOPE" && cargo audit 2>&1 | tail -40 || true)"
-  say '```'; say "$AUD"; say '```'
-  echo "$AUD" | $RG -qi 'error|vulnerab' && hit HIGH "cargo audit reported advisories" "see Dependency advisories section"
+  AUD="$(cd "$SCOPE" && cargo audit 2>&1)"; RC=$?   # exit!=0 == actual vulnerabilities (warnings are allowed/exit 0)
+  say '```'; say "$(printf '%s\n' "$AUD" | tail -40)"; say '```'
+  if [ "$RC" -ne 0 ]; then hit HIGH "cargo audit found vulnerabilities (exit $RC)" "see Dependency advisories section"; fi
+  if printf '%s\n' "$AUD" | $RG -q 'unmaintained'; then
+    hit LOW "unmaintained dependency (advisory warning, not a vulnerability)" "$(printf '%s\n' "$AUD" | $RG 'Crate:|Title:|ID:' | head -8)"
+  fi
 else
   say "_cargo-audit not installed — RUSTSEC advisory scan skipped (install: cargo install cargo-audit)._"
 fi
