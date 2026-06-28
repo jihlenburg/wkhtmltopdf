@@ -289,3 +289,31 @@ Run 2026-06-28 on macOS arm64; Google Chrome 149; verification with PyMuPDF cros
 - Conclusion: `createPDF` is a content capture, not a paginating print; the paginated path (`NSPrintOperation`) is GUI/WindowServer-bound and unverified; WPE has no print-to-PDF. Native WebKit dropped from v1.
 
 **Pending spikes (Milestone 1):** AcroForm-via-QPDF (top High risk); broader pagination corpus (widows/orphans, large splitting tables, multi-doc, RTL/CJK); single-engine visual/pixel diff vs legacy documents.
+
+**SPIKE (AcroForm), Milestone 1:** RESULT — QPDF (`QPDFAcroFormDocumentHelper::addFormField`) creates an interactive text-field widget on top of an unpatched engine PDF; verified via lopdf (catalog /AcroForm has one /Fields entry). Forms→AcroForm is feasible; QPDF (not lopdf) is the production path. Top High risk retired.
+
+---
+
+## 12. Fidelity decision & measurement results (2026-06-28)
+
+**DECISION (user, data-driven — supersedes the §2 "structural fidelity only" framing):** No-Qt (Chromium) stays the engine; the **OLD wkhtmltopdf 0.12.6 is the GOLD-STANDARD oracle for ALL automatic tests**; we **maximize output fidelity to it via an opt-in legacy-compat rendering profile**. Near-identical output is the stated top priority, *measured against the oracle*.
+
+**Measurement** (harness in `wkhtmltox-rs/tests/compat/`; oracle = `/Users/jihlenburg/.local/wkhtmltox/bin/wkhtmltopdf` 0.12.6; matched A4/10mm/96dpi):
+- Baseline 6 docs: text **1.00**, outline **100%**, visual SSIM **0.72**, mean score **0.82**, page drift 2.
+- Edge 16 docs: text **0.91**, SSIM **0.83**, mean score **0.86**, page drift 4, **0 crashes** (both engines).
+- **Pattern:** text + structure are already **identical**; the visual/pagination gap is **engine-intrinsic** (Chromium UA stylesheet + font metrics → more vertical spacing → +1-page drift, compounding on long docs). The *largest* divergences are cases where **Chromium is more correct** than the 2012 oracle: CSS3 `break-before`, `widows`/`orphans`, `hyphens:auto`, `var()`/`calc()`, `<thead>` repeat, `object-fit`.
+- **Implication:** matching the oracle "nearly identically" is largely **subtractive** — reproduce the old engine's defaults/limitations.
+
+**Testing-gate policy (oracle = gold standard; PRIMARY suite = `tests/compat/`):**
+- **HARD GATE** (CI fails): per-doc text similarity ≥ threshold (≈1.0); outline/bookmark tree exact; TOC entries; AcroForm fields; page count within tolerance for compat-profile docs.
+- **SCORED TARGET** (ratcheting): per-page visual **SSIM**; thresholds tighten as the compat profile improves.
+
+**Legacy-compat rendering profile** (opt-in, e.g. `--compat=wk0126`; default mode keeps Chromium's more-correct modern rendering):
+- Inject a **UA-reset stylesheet** matching Qt4-WebKit/wkhtmltopdf defaults (margins, line-height, default font sizes/families).
+- **Font-metric + margin matching**; default page size/margins matching wkhtmltopdf.
+- **Normalize** CSS3 `break-*` ↔ legacy `page-break-*`; optionally disable `hyphens:auto`, `widows`/`orphans`, and `<thead>` repetition to mirror the old engine.
+- Goal: push visual SSIM toward **~0.95** and minimize page-count drift on real documents.
+
+**Irreducible residual (documented):** pixel-perfect *pagination* on long/complex docs is not fully achievable without the original engine — line-breaking is engine-intrinsic. This is the only dimension where "identical" is out of reach.
+
+**Next milestone (new):** design + build the legacy-compat profile, driven by the oracle harness as the optimization target.
