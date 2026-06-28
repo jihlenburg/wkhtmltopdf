@@ -136,6 +136,87 @@ impl Cdp {
         self.msg_buf.drain(..).collect()
     }
 
+    /// Send a CDP command and, while awaiting its response, service every
+    /// `Fetch.requestPaused` event that arrives by calling `on_fetch`.
+    ///
+    /// `on_fetch` receives the complete event JSON and returns a list of
+    /// `(method, params)` pairs to fire immediately via `send_only` (e.g.
+    /// `Fetch.continueRequest` / `Fetch.failRequest`).  The closure must not
+    /// call any method on `self`; return the commands instead.
+    ///
+    /// Non-Fetch events received while waiting are pushed to `msg_buf` so the
+    /// caller's event pump can process them later via [`read_message`].
+    ///
+    /// Errors from `send_only` (responding to Fetch events) are silently
+    /// ignored — fail-closed: the paused request stays blocked rather than
+    /// letting it through.
+    pub fn call_pumping<F>(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+        mut on_fetch: F,
+    ) -> Result<serde_json::Value>
+    where
+        F: FnMut(&serde_json::Value) -> Result<Vec<(String, serde_json::Value)>>,
+    {
+        self.next_id += 1;
+        let id = self.next_id;
+        let deadline = Instant::now() + CALL_TIMEOUT;
+
+        self.sock
+            .send(Message::Text(request_frame(id, method, &params)))
+            .map_err(|e| WkError::Engine(format!("cdp send: {e}")))?;
+
+        // Drain internal buffer first — handle buffered Fetch events from prior
+        // cdp.call() invocations that arrived while waiting for something else.
+        let prior: Vec<serde_json::Value> = self.msg_buf.drain(..).collect();
+        for msg in prior {
+            if msg.get("method").and_then(|m| m.as_str()) == Some("Fetch.requestPaused") {
+                if let Ok(cmds) = on_fetch(&msg) {
+                    for (m, p) in cmds {
+                        let _ = self.send_only(&m, p);
+                    }
+                }
+            } else {
+                self.msg_buf.push(msg);
+            }
+        }
+
+        loop {
+            let msg = match self.sock.read() {
+                Ok(m) => m,
+                Err(e) if is_read_timeout(&e) => {
+                    if Instant::now() >= deadline {
+                        return Err(WkError::Engine(format!(
+                            "cdp call timeout: {method}"
+                        )));
+                    }
+                    continue;
+                }
+                Err(e) => return Err(WkError::Engine(format!("cdp read: {e}"))),
+            };
+            if let Message::Text(t) = msg {
+                if let Some(res) = parse_response(&t, id) {
+                    return res.map_err(WkError::Engine);
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
+                    if v.get("method").and_then(|m| m.as_str())
+                        == Some("Fetch.requestPaused")
+                    {
+                        if let Ok(cmds) = on_fetch(&v) {
+                            for (m, p) in cmds {
+                                let _ = self.send_only(&m, p);
+                            }
+                        }
+                    } else {
+                        // Buffer everything else (Page.loadEventFired, etc.)
+                        self.msg_buf.push(v);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn wait_event(&mut self, method: &str, timeout: Duration) -> Result<serde_json::Value> {
         let deadline = std::time::Instant::now() + timeout;
         while std::time::Instant::now() < deadline {

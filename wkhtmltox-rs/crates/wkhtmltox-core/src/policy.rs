@@ -212,22 +212,35 @@ fn extract_http_host(rest: &str) -> &str {
     // Strip the mandatory `//` authority introducer.
     let after_slashes = rest.strip_prefix("//").unwrap_or(rest);
 
+    // Strip userinfo: drop everything up to and including the LAST '@'
+    // that appears inside the authority (before the first path separator).
+    // We look only within the authority to avoid stripping a '@' in the path.
+    let authority_end = after_slashes
+        .find(['/', '?', '#'])
+        .unwrap_or(after_slashes.len());
+    let authority = &after_slashes[..authority_end];
+    let after_userinfo = if let Some(at) = authority.rfind('@') {
+        &after_slashes[at + 1..]
+    } else {
+        after_slashes
+    };
+
     // IPv6 literal `[…]` — the host ends at the closing `]`.
-    if after_slashes.starts_with('[') {
-        if let Some(close) = after_slashes.find(']') {
-            return &after_slashes[..=close];
+    if after_userinfo.starts_with('[') {
+        if let Some(close) = after_userinfo.find(']') {
+            return &after_userinfo[..=close];
         }
         // Malformed IPv6 literal — return what we have; it won't parse as an
         // IP so it won't be blocked (conservative: allow unknown).
-        return after_slashes;
+        return after_userinfo;
     }
 
     // Ordinary host (IPv4 or DNS name): ends at the first `/`, `:`, `?`, `#`.
-    let end = after_slashes
+    let end = after_userinfo
         .find(['/', ':', '?', '#'])
-        .unwrap_or(after_slashes.len());
+        .unwrap_or(after_userinfo.len());
 
-    &after_slashes[..end]
+    &after_userinfo[..end]
 }
 
 // ---------------------------------------------------------------------------
@@ -314,17 +327,48 @@ pub fn is_private_ip(host: &str) -> bool {
 // IPv4 helpers
 // ---------------------------------------------------------------------------
 
-/// Parse a dotted-decimal IPv4 address into 4 bytes, returning `None` for any
-/// other string including those with extra octets or non-numeric parts.
+/// Parse an integer in decimal, hex (`0x…`/`0X…`), or octal (`0…`) notation.
+fn parse_int32(s: &str) -> Option<u32> {
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u32::from_str_radix(hex, 16).ok()
+    } else if s.starts_with('0') && s.len() > 1 {
+        // Leading zero → octal.
+        u32::from_str_radix(&s[1..], 8).ok()
+    } else {
+        s.parse::<u32>().ok()
+    }
+}
+
+/// Parse one octet that may be decimal, hex, or octal. Returns `None` if value exceeds 255.
+fn parse_octet(s: &str) -> Option<u8> {
+    let n = parse_int32(s)?;
+    if n > 255 { return None; }
+    Some(n as u8)
+}
+
+/// Parse an IPv4 address, accepting dotted-decimal/hex/octal and single 32-bit integers.
 fn parse_ipv4(s: &str) -> Option<[u8; 4]> {
+    if !s.contains('.') {
+        // Single-integer form: decimal, hex, or octal 32-bit value.
+        let n = parse_int32(s)?;
+        return Some([
+            ((n >> 24) & 0xFF) as u8,
+            ((n >> 16) & 0xFF) as u8,
+            ((n >> 8)  & 0xFF) as u8,
+            ( n        & 0xFF) as u8,
+        ]);
+    }
+
+    // Dotted form: each part may be decimal, hex, or octal.
     let mut iter = s.splitn(5, '.');
-    let a: u8 = iter.next()?.parse().ok()?;
-    let b: u8 = iter.next()?.parse().ok()?;
-    let c: u8 = iter.next()?.parse().ok()?;
-    // Fourth part must exist and consume the remainder (no fifth token).
+    let a = parse_octet(iter.next()?)?;
+    let b = parse_octet(iter.next()?)?;
+    let c = parse_octet(iter.next()?)?;
     let d_str = iter.next()?;
-    let d: u8 = d_str.parse().ok()?;
-    // If there is a fifth group, it is not a valid dotted-quad address.
+    let d = parse_octet(d_str)?;
     if iter.next().is_some() {
         return None;
     }
@@ -351,45 +395,67 @@ fn is_private_ipv4(ip: [u8; 4]) -> bool {
 /// Parse an IPv6 address string (without brackets) into 16 bytes, returning
 /// `None` for any string that is not a syntactically valid IPv6 address.
 ///
-/// Handles the `::` zero-run abbreviation and fully-expanded addresses.
-/// Does NOT handle IPv4-mapped addresses (`::ffff:1.2.3.4`) — those are
-/// uncommon in HTTP URLs and can be added post-v1.
+/// Handles the `::` zero-run abbreviation, fully-expanded addresses, and
+/// mixed IPv4-mapped notation (`::ffff:127.0.0.1`).
 fn parse_ipv6(s: &str) -> Option<[u8; 16]> {
-    // Strip any zone ID (e.g. "%25eth0" in a percent-encoded URL) — we only
-    // care about the IP part for security classification.
+    // Strip any zone ID (e.g. "%25eth0" in a percent-encoded URL).
     let s = match s.find('%') {
         Some(pos) => &s[..pos],
         None => s,
     };
 
     // Split on `::` (zero-run abbreviation).
-    let (left_str, right_str, has_double_colon) = if let Some(pos) = s.find("::") {
+    let (left_str, right_raw, has_double_colon) = if let Some(pos) = s.find("::") {
         (&s[..pos], &s[pos + 2..], true)
     } else {
         (s, "", false)
     };
 
-    let left_groups = parse_ipv6_groups(left_str)?;
-    let right_groups = parse_ipv6_groups(right_str)?;
-
-    let total = left_groups.len() + right_groups.len();
-
-    if has_double_colon {
-        if total > 8 {
-            return None; // too many groups
+    // Detect mixed IPv4-in-IPv6 notation on the right side, e.g. `::ffff:127.0.0.1`.
+    // The IPv4 literal is the segment after the last ':' when it contains a '.'.
+    let (right_hex, embedded_v4): (&str, Option<[u8; 4]>) = if right_raw.contains('.') {
+        if let Some(last_colon) = right_raw.rfind(':') {
+            let ipv4_str = &right_raw[last_colon + 1..];
+            let hex_part = &right_raw[..last_colon];
+            let v4 = parse_ipv4(ipv4_str)?;
+            (hex_part, Some(v4))
+        } else {
+            // Entire right side is IPv4: e.g. `::1.2.3.4`
+            let v4 = parse_ipv4(right_raw)?;
+            ("", Some(v4))
         }
-        let mut groups = left_groups;
-        // Extend with zeros to fill the `::` gap, then append the right side.
-        let target_len = 8 - right_groups.len();
-        groups.resize(target_len, 0u16);
-        groups.extend(right_groups);
-        ipv6_groups_to_bytes(&groups)
     } else {
-        if left_groups.len() != 8 {
-            return None; // must have exactly 8 groups without `::`
-        }
-        ipv6_groups_to_bytes(&left_groups)
+        (right_raw, None)
+    };
+
+    let left_groups = parse_ipv6_groups(left_str)?;
+    let right_groups = parse_ipv6_groups(right_hex)?;
+
+    // Each embedded IPv4 octet-pair counts as one u16 group (2 groups total).
+    let v4_count = if embedded_v4.is_some() { 2 } else { 0 };
+    let total = left_groups.len() + right_groups.len() + v4_count;
+
+    let mut groups: Vec<u16> = if has_double_colon {
+        if total > 8 { return None; }
+        let mut g = left_groups;
+        let target_len = 8 - right_groups.len() - v4_count;
+        g.resize(target_len, 0u16);
+        g.extend(right_groups);
+        g
+    } else {
+        if total != 8 { return None; }
+        let mut g = left_groups;
+        g.extend(right_groups);
+        g
+    };
+
+    // Append the embedded IPv4 as two big-endian u16 words.
+    if let Some([a, b, c, d]) = embedded_v4 {
+        groups.push(u16::from_be_bytes([a, b]));
+        groups.push(u16::from_be_bytes([c, d]));
     }
+
+    ipv6_groups_to_bytes(&groups)
 }
 
 /// Parse a colon-separated sequence of hex groups, returning an empty `Vec`
@@ -422,17 +488,18 @@ fn is_private_ipv6(ip: [u8; 16]) -> bool {
     }
 
     // fc00::/7 — unique-local (RFC 4193)
-    // The high 7 bits of the first byte must be 0b1111_110x, i.e.:
-    //   byte[0] & 0xFE == 0xFC
     if ip[0] & 0xFE == 0xFC {
         return true;
     }
 
     // fe80::/10 — link-local (RFC 4291)
-    // First byte must be 0xFE; second byte high 2 bits must be 0b10, i.e.:
-    //   byte[1] & 0xC0 == 0x80  (covers fe80:: through febf::)
     if ip[0] == 0xFE && (ip[1] & 0xC0 == 0x80) {
         return true;
+    }
+
+    // ::ffff:0:0/96 — IPv4-mapped (RFC 4291 §2.5.5.2).
+    if ip[..10] == [0u8; 10] && ip[10] == 0xFF && ip[11] == 0xFF {
+        return is_private_ipv4([ip[12], ip[13], ip[14], ip[15]]);
     }
 
     false
@@ -1022,5 +1089,166 @@ mod tests {
     #[test]
     fn ipv4_parse_rejects_overflow_octet() {
         assert!(parse_ipv4("256.0.0.1").is_none());
+    }
+
+    // ========================================================================
+    // C2 — userinfo stripping in extract_http_host
+    // ========================================================================
+
+    #[test]
+    fn extract_http_host_strips_userinfo() {
+        assert_eq!(extract_http_host("//user@127.0.0.1/"), "127.0.0.1");
+    }
+
+    #[test]
+    fn extract_http_host_strips_userinfo_with_port() {
+        assert_eq!(extract_http_host("//user:pass@example.com:8080/path"), "example.com");
+    }
+
+    #[test]
+    fn extract_http_host_strips_userinfo_ipv6() {
+        assert_eq!(extract_http_host("//user@[::1]/path"), "[::1]");
+    }
+
+    #[test]
+    fn safe_blocks_userinfo_loopback() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://user@127.0.0.1/", false), Decision::Block(_)),
+            "userinfo@loopback must be blocked under safe"
+        );
+    }
+
+    #[test]
+    fn safe_blocks_userinfo_link_local() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://user:pass@169.254.169.254/", false), Decision::Block(_)),
+            "userinfo@link-local must be blocked under safe"
+        );
+    }
+
+    // ========================================================================
+    // I1 — alternative IPv4 encodings
+    // ========================================================================
+
+    #[test]
+    fn parse_ipv4_decimal_integer() {
+        // 2130706433 == 0x7F000001 == 127.0.0.1
+        assert_eq!(parse_ipv4("2130706433"), Some([127, 0, 0, 1]));
+    }
+
+    #[test]
+    fn parse_ipv4_hex_integer() {
+        assert_eq!(parse_ipv4("0x7f000001"), Some([127, 0, 0, 1]));
+    }
+
+    #[test]
+    fn parse_ipv4_hex_integer_uppercase() {
+        assert_eq!(parse_ipv4("0X7F000001"), Some([127, 0, 0, 1]));
+    }
+
+    #[test]
+    fn parse_ipv4_octal_dotted_first_octet() {
+        // 0177 (octal) == 127
+        assert_eq!(parse_ipv4("0177.0.0.1"), Some([127, 0, 0, 1]));
+    }
+
+    #[test]
+    fn parse_ipv4_hex_dotted() {
+        assert_eq!(parse_ipv4("0x7f.0.0.1"), Some([127, 0, 0, 1]));
+    }
+
+    #[test]
+    fn safe_blocks_decimal_integer_loopback() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://2130706433/", false), Decision::Block(_)),
+            "decimal-integer loopback must be blocked under safe"
+        );
+    }
+
+    #[test]
+    fn safe_blocks_hex_integer_loopback() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://0x7f000001/", false), Decision::Block(_)),
+            "hex-integer loopback must be blocked under safe"
+        );
+    }
+
+    #[test]
+    fn safe_blocks_octal_dotted_loopback() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://0177.0.0.1/", false), Decision::Block(_)),
+            "octal-dotted loopback must be blocked under safe"
+        );
+    }
+
+    #[test]
+    fn safe_blocks_decimal_integer_imds() {
+        // 169.254.169.254 == 0xA9FEA9FE == 2852039166
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://2852039166/", false), Decision::Block(_)),
+            "decimal-integer IMDS must be blocked"
+        );
+    }
+
+    #[test]
+    fn public_decimal_integer_allowed() {
+        // 8.8.8.8 == 134744072 — public, must be allowed under default policy.
+        let p = ResourcePolicy::default();
+        assert_eq!(p.decide("http://134744072/", false), Decision::Allow);
+    }
+
+    // ========================================================================
+    // I2 — IPv4-mapped IPv6
+    // ========================================================================
+
+    #[test]
+    fn ipv4_mapped_ipv6_loopback_mixed_notation() {
+        assert!(is_private_ip("::ffff:127.0.0.1"));
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_loopback_pure_hex() {
+        // ::ffff:7f00:1 == ::ffff:127.0.0.1
+        assert!(is_private_ip("::ffff:7f00:1"));
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_imds_mixed_notation() {
+        assert!(is_private_ip("::ffff:169.254.169.254"));
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_imds_bracketed() {
+        assert!(is_private_ip("[::ffff:169.254.169.254]"));
+    }
+
+    #[test]
+    fn safe_blocks_ipv4_mapped_loopback() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://[::ffff:127.0.0.1]/", false), Decision::Block(_)),
+            "IPv4-mapped loopback must be blocked under safe"
+        );
+    }
+
+    #[test]
+    fn safe_blocks_ipv4_mapped_imds() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(
+            matches!(p.decide("http://[::ffff:169.254.169.254]/", false), Decision::Block(_)),
+            "IPv4-mapped IMDS must be blocked under safe"
+        );
+    }
+
+    #[test]
+    fn ipv4_mapped_public_not_private() {
+        // ::ffff:8.8.8.8 — public
+        assert!(!is_private_ip("::ffff:8.8.8.8"));
     }
 }

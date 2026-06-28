@@ -58,6 +58,23 @@ impl Drop for SpawnGuard {
     }
 }
 
+/// State maintained while Fetch interception is active for the current page.
+///
+/// Set by `open()`, cleared (and Fetch disabled) after `print_pdf()` or at
+/// the start of the next `open()`.  When `fetch_state` is `Some`, every CDP
+/// round-trip that could trigger subresource loads MUST go through
+/// `call_pumping` so that `Fetch.requestPaused` events are serviced inline.
+struct ActiveFetchState {
+    /// The URL we navigated to.  Top-level document requests whose URL matches
+    /// this value are allowed unconditionally (C1b).
+    nav_url: String,
+    /// Resource policy governing subresource decisions.
+    policy: ResourcePolicy,
+    /// Extra HTTP headers (custom + Basic-auth) to inject on `continueRequest`
+    /// ONLY when the request's origin matches `nav_url`'s origin (I3).
+    extra_headers: Vec<(String, String)>,
+}
+
 pub struct ChromiumRenderer {
     child: Child,
     user_data_dir: PathBuf,
@@ -76,6 +93,8 @@ pub struct ChromiumRenderer {
     /// URLs that were blocked by the [`ResourcePolicy`] during the most recent
     /// `open()` call.  Cleared at the start of each `open()`.
     blocked_urls: Vec<String>,
+    /// Active Fetch interception state.  `None` when Fetch is disabled.
+    fetch_state: Option<ActiveFetchState>,
 }
 
 impl ChromiumRenderer {
@@ -135,6 +154,11 @@ pub fn build_cookies_params(cookies: &[(String, String)], url: &str) -> serde_js
 /// empty (caller skips the CDP call).
 ///
 /// Pure function — no CDP calls; used by `open` and testable without a browser.
+///
+/// NOTE (I3): This function is kept for tests and future callers but is no
+/// longer used to issue a global `Network.setExtraHTTPHeaders` call.  Headers
+/// are now injected per-request via `Fetch.continueRequest` only for same-origin
+/// requests, preventing cross-origin credential leaks.
 pub fn build_extra_headers_params(
     custom_headers: &[(String, String)],
     username: Option<&str>,
@@ -156,6 +180,123 @@ pub fn build_extra_headers_params(
         None
     } else {
         Some(json!({ "headers": serde_json::Value::Object(map) }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Per-origin header injection (I3)
+// ---------------------------------------------------------------------------
+
+/// Extract `scheme://authority` from a URL for same-origin comparison.
+///
+/// Returns `None` for URLs without a `//` authority (e.g. `file:///path`
+/// where authority is empty, `data:`, or malformed URLs).
+fn extract_origin(url: &str) -> Option<String> {
+    let colon = url.find(':')?;
+    let scheme = url[..colon].to_ascii_lowercase();
+    let rest = &url[colon + 1..];
+    let after_slashes = rest.strip_prefix("//")?;
+    let auth_end = after_slashes
+        .find(['/', '?', '#'])
+        .unwrap_or(after_slashes.len());
+    Some(format!("{}://{}", scheme, &after_slashes[..auth_end]))
+}
+
+/// Return `true` when both URLs share the same scheme + authority.
+fn same_origin(url1: &str, url2: &str) -> bool {
+    match (extract_origin(url1), extract_origin(url2)) {
+        (Some(o1), Some(o2)) => o1 == o2,
+        _ => false,
+    }
+}
+
+/// Build `Fetch.continueRequest` params, injecting `extra_headers` when the
+/// request is same-origin with `nav_url`.
+///
+/// When extra headers are injected the original request headers (from the
+/// `Fetch.requestPaused` event) are preserved and the extra headers are merged
+/// in, so Chrome sends all headers the page would have sent plus ours.
+fn build_continue_params(
+    request_id: &str,
+    req_url: &str,
+    original_headers: &serde_json::Value,
+    nav_url: &str,
+    extra_headers: &[(String, String)],
+) -> serde_json::Value {
+    if !extra_headers.is_empty() && same_origin(req_url, nav_url) {
+        let mut headers = original_headers
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        for (name, value) in extra_headers {
+            headers.insert(name.clone(), serde_json::Value::String(value.clone()));
+        }
+        json!({
+            "requestId": request_id,
+            "headers": serde_json::Value::Object(headers),
+        })
+    } else {
+        json!({ "requestId": request_id })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch event handler (C1, C1b, I3)
+// ---------------------------------------------------------------------------
+
+/// Process a single `Fetch.requestPaused` event and return the CDP commands
+/// to execute in response (`Fetch.continueRequest` or `Fetch.failRequest`).
+///
+/// * C1b: The top-level document request (identified by `resourceType ==
+///   "Document"` AND `url == nav_url`) is always allowed, so that
+///   `--safe <file.html>` and `--safe --toc`/`--cover` work.
+/// * Policy: All other requests (subresources, sub-frame documents) are
+///   evaluated via `fetch_action`.
+/// * I3: Allowed same-origin requests receive `extra_headers` via
+///   `continueRequest`.
+///
+/// Blocked URLs are appended to `blocked`.
+fn handle_fetch_event(
+    msg: &serde_json::Value,
+    policy: &ResourcePolicy,
+    nav_url: &str,
+    extra_headers: &[(String, String)],
+    blocked: &mut Vec<String>,
+) -> Result<Vec<(String, serde_json::Value)>> {
+    let params = &msg["params"];
+    let request_id = params["requestId"].as_str().unwrap_or("").to_string();
+    let req_url = params["request"]["url"].as_str().unwrap_or("").to_string();
+    let resource_type = params["resourceType"].as_str().unwrap_or("");
+    let original_headers = &params["request"]["headers"];
+
+    // C1b: top-level document — allow unconditionally.
+    if resource_type == "Document" && req_url == nav_url {
+        let cp = build_continue_params(
+            &request_id, &req_url, original_headers, nav_url, extra_headers,
+        );
+        return Ok(vec![("Fetch.continueRequest".into(), cp)]);
+    }
+
+    let is_redirect = params
+        .get("responseStatusCode")
+        .and_then(|c| c.as_u64())
+        .map(|code| (300..=399).contains(&code))
+        .unwrap_or(false);
+
+    match fetch_action(policy, &req_url, is_redirect) {
+        FetchDecision::Continue => {
+            let cp = build_continue_params(
+                &request_id, &req_url, original_headers, nav_url, extra_headers,
+            );
+            Ok(vec![("Fetch.continueRequest".into(), cp)])
+        }
+        FetchDecision::Fail => {
+            blocked.push(req_url);
+            Ok(vec![("Fetch.failRequest".into(), json!({
+                "requestId": request_id,
+                "errorReason": "Aborted",
+            }))])
+        }
     }
 }
 
@@ -256,12 +397,60 @@ impl ChromiumRenderer {
 
         // All succeeded — disarm the guard and hand ownership to ChromiumRenderer.
         let (child, user_data_dir) = guard.disarm();
-        Ok(Self { child, user_data_dir, cdp, compat_ua_css: None, _html_temp: None, blocked_urls: Vec::new() })
+        Ok(Self {
+            child,
+            user_data_dir,
+            cdp,
+            compat_ua_css: None,
+            _html_temp: None,
+            blocked_urls: Vec::new(),
+            fetch_state: None,
+        })
+    }
+
+    /// Send a CDP command while servicing `Fetch.requestPaused` events inline.
+    ///
+    /// When Fetch interception is active (`fetch_state.is_some()`), every CDP
+    /// round-trip that might trigger subresource loads (Runtime.evaluate,
+    /// Page.printToPDF) MUST go through this method instead of `cdp.call()`.
+    /// This ensures that post-load JS network requests (e.g. via `setTimeout`)
+    /// are intercepted and policy-evaluated even during `wait_ready` delays and
+    /// PDF printing (C1 fix).
+    ///
+    /// Falls back to `cdp.call()` when Fetch is not active.
+    fn call_pumping(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        if self.fetch_state.is_none() {
+            return self.cdp.call(method, params);
+        }
+
+        // Clone the state fields we need; the borrow of `self.fetch_state`
+        // ends here so we can mutably borrow `self.cdp` and `self.blocked_urls`
+        // independently (split borrow).
+        let nav_url = self.fetch_state.as_ref().unwrap().nav_url.clone();
+        let policy = self.fetch_state.as_ref().unwrap().policy.clone();
+        let extra_headers = self.fetch_state.as_ref().unwrap().extra_headers.clone();
+
+        let mut new_blocked: Vec<String> = Vec::new();
+
+        let result = self.cdp.call_pumping(method, params, |msg| {
+            handle_fetch_event(msg, &policy, &nav_url, &extra_headers, &mut new_blocked)
+        })?;
+
+        self.blocked_urls.extend(new_blocked);
+        Ok(result)
     }
 }
 
 impl Drop for ChromiumRenderer {
     fn drop(&mut self) {
+        // Best-effort: disable Fetch if it is still active for the current page.
+        if self.fetch_state.is_some() {
+            let _ = self.cdp.send_only("Fetch.disable", json!({}));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.user_data_dir);
@@ -302,11 +491,37 @@ impl Renderer for ChromiumRenderer {
                 return Err(WkError::Engine("Stdin source not supported by ChromiumRenderer".into())),
         };
 
+        // ── Cleanup from previous page ────────────────────────────────────────
+        //
+        // If Fetch was still enabled from the previous page (e.g. print_pdf
+        // errored), disable it now before re-enabling for the new page.
+        if self.fetch_state.is_some() {
+            let _ = self.cdp.send_only("Fetch.disable", json!({}));
+            self.fetch_state = None;
+        }
+
         // Clear blocked-URLs from any previous open() call.
         self.blocked_urls.clear();
 
         // Persist compat CSS so wait_ready() can inject it after the page loads.
         self.compat_ua_css = load.compat_ua_css.clone();
+
+        // ── Build per-origin extra headers (I3) ───────────────────────────────
+        //
+        // Custom headers and Basic-auth credentials are injected via
+        // Fetch.continueRequest ONLY for same-origin requests, preventing
+        // cross-origin credential leaks.  We intentionally do NOT call
+        // Network.setExtraHTTPHeaders, which would send them to all hosts.
+        let extra_headers: Vec<(String, String)> = {
+            let mut h = load.custom_headers.clone();
+            if let (Some(u), Some(p)) = (load.username.as_deref(), load.password.as_deref()) {
+                let creds = format!("{u}:{p}");
+                let encoded =
+                    base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
+                h.push(("Authorization".into(), format!("Basic {encoded}")));
+            }
+            h
+        };
 
         // ── Apply networking settings via CDP ─────────────────────────────────
         self.cdp.call("Network.enable", json!({}))?;
@@ -319,13 +534,8 @@ impl Renderer for ChromiumRenderer {
             self.cdp.call("Network.setCookies", params)?;
         }
 
-        if let Some(headers_params) = build_extra_headers_params(
-            &load.custom_headers,
-            load.username.as_deref(),
-            load.password.as_deref(),
-        ) {
-            self.cdp.call("Network.setExtraHTTPHeaders", headers_params)?;
-        }
+        // NOTE: Network.setExtraHTTPHeaders is intentionally NOT called here.
+        // Auth + custom headers are injected per-request via the Fetch pump (I3).
 
         if load.no_check_certificate {
             self.cdp.call("Security.enable", json!({}))?;
@@ -336,69 +546,55 @@ impl Renderer for ChromiumRenderer {
             self.cdp.call("Emulation.setScriptExecutionDisabled", json!({ "value": true }))?;
         }
 
-        // ── Enable Fetch interception for ResourcePolicy enforcement ──────────
+        // ── Enable Fetch interception (whole-load, C1) ────────────────────────
         //
         // `Fetch.enable` pauses every matching request until the debugger
-        // responds with continueRequest or failRequest.  We enable it
-        // unconditionally so the enforcement path is always exercised (simplifies
-        // reasoning about correctness) and disable it again after loadEventFired.
+        // responds with continueRequest or failRequest.  Fetch stays enabled
+        // from here until `print_pdf` completes (or the next `open()` / Drop).
+        // This ensures post-load JS requests (e.g. via setTimeout) are still
+        // intercepted during wait_ready() delays and PDF printing (C1 fix).
         //
-        // IMPORTANT: Because Fetch.enable pauses requests, the old "poll
-        // document.readyState" approach no longer works for detecting load
-        // completion — the page can never reach readyState=complete while its
-        // requests are paused.  We instead wait for Page.loadEventFired in the
-        // event pump below and then disable Fetch before handing off to
-        // wait_ready().
-        self.cdp.call("Fetch.enable", json!({
-            "patterns": [{ "urlPattern": "*" }],
-            "handleAuthRequests": false
-        }))?;
-
-        // CRITICAL: Use send_only for Page.navigate, NOT call().
-        //
+        // IMPORTANT: Use send_only for Page.navigate (not call()).
         // When Fetch.enable is active, Chrome intercepts the navigation request
         // itself via Fetch.requestPaused BEFORE sending the Page.navigate
         // response.  Using call() here causes a deadlock:
         //   - call() blocks waiting for the Page.navigate response
         //   - Chrome waits for us to send continueRequest/failRequest first
         //   - Neither can proceed → 60-second timeout
-        //
-        // send_only() fires the command and returns immediately.  The navigate
-        // response arrives later in the event pump as a regular message with
-        // an `id` field (not a `method` field) and is silently ignored — we
-        // use Page.loadEventFired as the completion signal instead.
+        self.cdp.call("Fetch.enable", json!({
+            "patterns": [{ "urlPattern": "*" }],
+            "handleAuthRequests": false
+        }))?;
+
         self.cdp.send_only("Page.navigate", json!({ "url": url }))?;
 
         // ── Event pump ────────────────────────────────────────────────────────
         //
         // Read CDP messages until Page.loadEventFired or the 60 s deadline.
-        // For each Fetch.requestPaused event:
-        //   Allow → Fetch.continueRequest (fire-and-forget via send_only)
-        //   Block → Fetch.failRequest + record URL in blocked_urls
+        // For each Fetch.requestPaused event, apply C1b + policy + I3 logic
+        // (see handle_fetch_event).
         //
         // After Page.loadEventFired we continue the loop for up to 200 ms to
-        // drain any Fetch.requestPaused events that Chrome had already queued.
-        // The drain exits when there are no messages for 200 ms; command
-        // responses to our continueRequest calls (with `id` but no `method`)
-        // are read and silently discarded, allowing the idle window to fill.
+        // drain any Fetch.requestPaused events Chrome had already queued.
+        //
+        // IMPORTANT: We do NOT disable Fetch after this pump (C1 fix).  Fetch
+        // stays active during wait_ready() and print_pdf() so that post-load
+        // JavaScript requests are still intercepted.
         let load_deadline = Instant::now() + Duration::from_secs(60);
         let mut page_loaded = false;
         'pump: loop {
             if Instant::now() >= load_deadline {
-                // Disable Fetch before returning so subsequent calls aren't stuck.
+                // Best-effort cleanup before returning the error.
                 let _ = self.cdp.send_only("Fetch.disable", json!({}));
+                self.fetch_state = None;
                 return Err(WkError::Engine(
                     "timeout waiting for Page.loadEventFired".into()
                 ));
             }
 
-            // After the page has loaded, use a short drain timeout so we exit
-            // promptly once there are no more pending Fetch events.
             let poll_ms = if page_loaded { 200 } else { 250 };
             let Some(msg) = self.cdp.read_message(Duration::from_millis(poll_ms)) else {
                 if page_loaded {
-                    // No message for 200 ms after loadEventFired — all pending
-                    // Fetch.requestPaused events have been handled.
                     break 'pump;
                 }
                 continue 'pump;
@@ -407,98 +603,77 @@ impl Renderer for ChromiumRenderer {
             match msg.get("method").and_then(|m| m.as_str()) {
                 Some("Fetch.requestPaused") => {
                     let params = &msg["params"];
-                    let request_id = params["requestId"].as_str().unwrap_or("").to_string();
+                    let request_id =
+                        params["requestId"].as_str().unwrap_or("").to_string();
                     let req_url = params["request"]["url"]
                         .as_str()
                         .unwrap_or("")
                         .to_string();
-                    // A paused response (with responseStatusCode) is a redirect.
+                    let resource_type =
+                        params["resourceType"].as_str().unwrap_or("");
+                    let original_headers = &params["request"]["headers"];
                     let is_redirect = params
                         .get("responseStatusCode")
                         .and_then(|c| c.as_u64())
                         .map(|code| (300..=399).contains(&code))
                         .unwrap_or(false);
 
-                    match fetch_action(&load.policy, &req_url, is_redirect) {
-                        FetchDecision::Continue => {
-                            self.cdp.send_only(
-                                "Fetch.continueRequest",
-                                json!({ "requestId": request_id }),
-                            )?;
-                        }
-                        FetchDecision::Fail => {
-                            self.blocked_urls.push(req_url);
-                            self.cdp.send_only(
-                                "Fetch.failRequest",
-                                json!({
-                                    "requestId": request_id,
-                                    "errorReason": "Aborted"
-                                }),
-                            )?;
+                    // C1b: allow top-level document unconditionally.
+                    if resource_type == "Document" && req_url == url {
+                        let cp = build_continue_params(
+                            &request_id, &req_url, original_headers,
+                            &url, &extra_headers,
+                        );
+                        self.cdp.send_only("Fetch.continueRequest", cp)?;
+                    } else {
+                        match fetch_action(&load.policy, &req_url, is_redirect) {
+                            FetchDecision::Continue => {
+                                let cp = build_continue_params(
+                                    &request_id, &req_url, original_headers,
+                                    &url, &extra_headers,
+                                );
+                                self.cdp.send_only("Fetch.continueRequest", cp)?;
+                            }
+                            FetchDecision::Fail => {
+                                self.blocked_urls.push(req_url);
+                                self.cdp.send_only(
+                                    "Fetch.failRequest",
+                                    json!({
+                                        "requestId": request_id,
+                                        "errorReason": "Aborted",
+                                    }),
+                                )?;
+                            }
                         }
                     }
                 }
                 Some("Page.loadEventFired") => {
                     page_loaded = true;
-                    // Continue the loop to drain any remaining buffered
-                    // Fetch.requestPaused events (see comment above).
                 }
-                _ => {} // Ignore command responses (id-keyed) and other events.
+                _ => {}
             }
         }
 
-        // Disable Fetch interception so wait_ready()'s Runtime.evaluate calls
-        // are not blocked by paused requests triggered by page JavaScript.
-        // call() is used here (not send_only) so we wait for Chrome to confirm
-        // the disable — any Fetch.requestPaused events arriving during this
-        // call are buffered in msg_buf and handled in the post-disable drain.
-        let _ = self.cdp.call("Fetch.disable", json!({}));
-
-        // Post-disable drain: respond to any Fetch.requestPaused events that
-        // Chrome sent between loadEventFired and our Fetch.disable command.
-        // Chrome may not auto-resume these; ignoring them risks a hang.
-        {
-            let buffered = self.cdp.drain_buffer();
-            for msg in buffered {
-                if msg.get("method").and_then(|m| m.as_str()) != Some("Fetch.requestPaused") {
-                    continue;
-                }
-                let params = &msg["params"];
-                let request_id = params["requestId"].as_str().unwrap_or("").to_string();
-                let req_url = params["request"]["url"].as_str().unwrap_or("").to_string();
-                let is_redirect = params
-                    .get("responseStatusCode")
-                    .and_then(|c| c.as_u64())
-                    .map(|code| (300..=399).contains(&code))
-                    .unwrap_or(false);
-                match fetch_action(&load.policy, &req_url, is_redirect) {
-                    FetchDecision::Continue => {
-                        let _ = self.cdp.send_only(
-                            "Fetch.continueRequest",
-                            json!({ "requestId": request_id }),
-                        );
-                    }
-                    FetchDecision::Fail => {
-                        self.blocked_urls.push(req_url);
-                        let _ = self.cdp.send_only(
-                            "Fetch.failRequest",
-                            json!({ "requestId": request_id, "errorReason": "Aborted" }),
-                        );
-                    }
-                }
-            }
-        }
+        // Fetch remains ENABLED.  Store state so call_pumping() can service
+        // Fetch.requestPaused events during wait_ready() and print_pdf().
+        self.fetch_state = Some(ActiveFetchState {
+            nav_url: url,
+            policy: load.policy.clone(),
+            extra_headers,
+        });
 
         Ok(PageHandle(1))
     }
 
     fn wait_ready(&mut self, _p: PageHandle, ready: &ReadyPolicy) -> Result<()> {
-        // Poll document.readyState until "complete", bounded by a 30 s deadline.
-        // This avoids the race where Page.loadEventFired fires during navigate's
-        // call() loop and is silently discarded as a non-matching id.
+        // Poll document.readyState until "complete".
+        //
+        // IMPORTANT: Use call_pumping (not cdp.call) so that Fetch.requestPaused
+        // events are serviced while we wait for the Runtime.evaluate response.
+        // This keeps policy enforcement active during the readyState polling loop.
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            let val = self.cdp.call(
+            let val = self.call_pumping(
                 "Runtime.evaluate",
                 json!({ "expression": "document.readyState", "returnByValue": true }),
             )?;
@@ -513,7 +688,6 @@ impl Renderer for ChromiumRenderer {
 
         // Inject compat UA-reset stylesheet if configured.
         if let Some(css) = &self.compat_ua_css.clone() {
-            // JSON-encode the CSS string so any quotes/backticks are safely escaped.
             let css_json = serde_json::to_string(css)
                 .map_err(|e| WkError::Engine(format!("compat css json encode: {e}")))?;
             let js = format!(
@@ -526,12 +700,14 @@ impl Renderer for ChromiumRenderer {
   (document.head || document.documentElement).appendChild(s);
 }})();"#
             );
-            self.cdp.call(
+            self.call_pumping(
                 "Runtime.evaluate",
                 json!({ "expression": js, "returnByValue": true }),
             )?;
         }
 
+        // JS delay — sleep, then any Fetch events queued during the sleep will
+        // be drained by the next call_pumping call (window_status or print_pdf).
         if ready.javascript_delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(ready.javascript_delay_ms));
         }
@@ -539,7 +715,7 @@ impl Renderer for ChromiumRenderer {
         if let Some(wanted) = &ready.window_status {
             let deadline2 = Instant::now() + Duration::from_secs(30);
             loop {
-                let val = self.cdp.call(
+                let val = self.call_pumping(
                     "Runtime.evaluate",
                     json!({ "expression": "window.status", "returnByValue": true }),
                 )?;
@@ -568,19 +744,31 @@ impl Renderer for ChromiumRenderer {
             Orientation::Portrait => (mm_to_in(g.width_mm), mm_to_in(g.height_mm)),
             Orientation::Landscape => (mm_to_in(g.height_mm), mm_to_in(g.width_mm)),
         };
-        let r = self.cdp.call("Page.printToPDF", json!({
+        // Use call_pumping so that any Fetch.requestPaused events Chrome fires
+        // during PDF rendering (e.g. lazy-loaded images) are serviced inline.
+        let r = self.call_pumping("Page.printToPDF", json!({
             "printBackground": g.print_background,
             "preferCSSPageSize": g.prefer_css_page_size,
             "generateDocumentOutline": g.generate_document_outline,
             "paperWidth": w, "paperHeight": h,
-            "marginTop": mm_to_in(g.margin_top_mm), "marginBottom": mm_to_in(g.margin_bottom_mm),
-            "marginLeft": mm_to_in(g.margin_left_mm), "marginRight": mm_to_in(g.margin_right_mm),
+            "marginTop": mm_to_in(g.margin_top_mm),
+            "marginBottom": mm_to_in(g.margin_bottom_mm),
+            "marginLeft": mm_to_in(g.margin_left_mm),
+            "marginRight": mm_to_in(g.margin_right_mm),
             "scale": g.scale,
             "transferMode": "ReturnAsBase64",
         }))?;
-        let b64 = r["data"].as_str().ok_or_else(|| WkError::Pdf("printToPDF: no data".into()))?;
-        base64::engine::general_purpose::STANDARD.decode(b64)
-            .map_err(|e| WkError::Pdf(format!("b64 decode: {e}")))
+
+        let b64 = r["data"].as_str()
+            .ok_or_else(|| WkError::Pdf("printToPDF: no data".into()))?;
+        let pdf = base64::engine::general_purpose::STANDARD.decode(b64)
+            .map_err(|e| WkError::Pdf(format!("b64 decode: {e}")))?;
+
+        // Page is done — disable Fetch interception.
+        let _ = self.cdp.send_only("Fetch.disable", json!({}));
+        self.fetch_state = None;
+
+        Ok(pdf)
     }
 
     fn snapshot(&mut self, _p: PageHandle, _o: &SnapshotOpts) -> Result<RawImage> {
@@ -746,5 +934,72 @@ mod tests {
             .expect("should be Some when auth is present");
         let auth = p["headers"]["Authorization"].as_str().unwrap();
         assert!(auth.starts_with("Basic "));
+    }
+
+    // ── same_origin / extract_origin unit tests ──────────────────────────────
+
+    #[test]
+    fn same_origin_http_match() {
+        assert!(same_origin("http://example.com/a", "http://example.com/b"));
+    }
+
+    #[test]
+    fn same_origin_different_hosts() {
+        assert!(!same_origin("http://example.com/", "http://evil.com/"));
+    }
+
+    #[test]
+    fn same_origin_different_schemes() {
+        assert!(!same_origin("http://example.com/", "https://example.com/"));
+    }
+
+    #[test]
+    fn same_origin_file_urls() {
+        // Both file:// → same origin (empty authority).
+        assert!(same_origin("file:///tmp/a.html", "file:///tmp/b.html"));
+    }
+
+    // ── build_continue_params unit tests ─────────────────────────────────────
+
+    #[test]
+    fn build_continue_params_no_extra_headers() {
+        let p = build_continue_params(
+            "req-1",
+            "https://example.com/img.png",
+            &json!({}),
+            "https://example.com/page.html",
+            &[],
+        );
+        assert_eq!(p["requestId"].as_str().unwrap(), "req-1");
+        assert!(p.get("headers").is_none() || p["headers"].is_null());
+    }
+
+    #[test]
+    fn build_continue_params_injects_headers_same_origin() {
+        let extra = vec![("X-Auth".to_string(), "token".to_string())];
+        let orig = json!({ "Accept": "image/*" });
+        let p = build_continue_params(
+            "req-2",
+            "https://example.com/api",
+            &orig,
+            "https://example.com/page.html",
+            &extra,
+        );
+        assert_eq!(p["headers"]["X-Auth"].as_str().unwrap(), "token");
+        assert_eq!(p["headers"]["Accept"].as_str().unwrap(), "image/*");
+    }
+
+    #[test]
+    fn build_continue_params_no_injection_cross_origin() {
+        let extra = vec![("Authorization".to_string(), "Basic xxx".to_string())];
+        let p = build_continue_params(
+            "req-3",
+            "https://cdn.evil.com/img.png",
+            &json!({}),
+            "https://example.com/page.html",
+            &extra,
+        );
+        // Cross-origin: headers must NOT be injected.
+        assert!(p.get("headers").is_none() || p["headers"].is_null());
     }
 }

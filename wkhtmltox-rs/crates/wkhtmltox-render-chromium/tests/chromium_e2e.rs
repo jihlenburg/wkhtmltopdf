@@ -131,6 +131,91 @@ fn respawn_back_to_back() {
     }
 }
 
+/// C1 + C1b: verify that Fetch interception stays active for the WHOLE page
+/// load — including post-load JS fired via setTimeout — and that the
+/// top-level file:// document still renders under --safe.
+///
+/// The page fires two SSRF/local-file requests from a `setTimeout` callback
+/// that runs AFTER `Page.loadEventFired`.  With the whole-load Fetch fix (C1)
+/// both requests arrive during `wait_ready()`'s JS delay and are blocked.
+/// Without the fix they would escape interception (the old code disabled Fetch
+/// immediately after loadEventFired).
+///
+/// C1b: The top-level file:// document itself must still load (we allow it
+/// unconditionally) and produce a valid `%PDF`.
+#[test]
+#[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
+fn post_load_ssrf_blocked_whole_load_fetch() {
+    use std::io::Write as _;
+    use wkhtmltox_core::policy::ResourcePolicy;
+
+    // Write a temp HTML file whose setTimeout fires AFTER Page.loadEventFired
+    // and tries to load two policy-blocked resources.
+    let mut tmp = tempfile::Builder::new()
+        .prefix("wkx-postload-ssrf-")
+        .suffix(".html")
+        .tempfile()
+        .expect("create temp html");
+    writeln!(
+        tmp,
+        r#"<!DOCTYPE html>
+<html><head><title>Post-load SSRF</title></head>
+<body><p>Post-load SSRF test (C1 + C1b)</p>
+<script>
+setTimeout(function() {{
+  // These fire AFTER loadEventFired — must still be intercepted under --safe.
+  new Image().src = 'http://169.254.169.254/x';
+  new Image().src = 'file:///etc/hosts';
+}}, 0);
+</script></body></html>"#
+    )
+    .expect("write html");
+    tmp.flush().expect("flush");
+    let main_path = tmp.path().to_str().expect("utf8 path").to_string();
+    let main_url = format!("file://{main_path}");
+
+    let mut r = ChromiumRenderer::spawn().expect("spawn chrome");
+    let policy = ResourcePolicy {
+        allow_local_file: false,
+        // Allow the main HTML file itself (C1b: top-level document).
+        allowed_paths: vec![main_path.clone()],
+        block_private_ips: true,
+        allow_external_links: true,
+        allow_internal_links: true,
+    };
+    let load = LoadSettings {
+        enable_javascript: true,
+        allow_local_file_access: false,
+        policy,
+        ..Default::default()
+    };
+    // JS delay gives the setTimeout callback time to fire and trigger requests.
+    let ready = ReadyPolicy {
+        javascript_delay_ms: 500,
+        ..Default::default()
+    };
+
+    // C1b: top-level file:// doc must load and produce %PDF even under --safe.
+    let p = r
+        .open(&Source::Url(main_url.clone()), &load)
+        .expect("open must succeed — C1b: top-level file:// doc is allowed");
+    r.wait_ready(p, &ready).expect("wait_ready must succeed");
+    let pdf = r
+        .print_pdf(p, &PageGeometry::default())
+        .expect("print_pdf must succeed — C1b: top-level renders");
+    assert!(pdf.starts_with(b"%PDF"), "output must be a valid PDF (C1b)");
+
+    let blocked = r.blocked_urls();
+    assert!(
+        blocked.iter().any(|u| u.contains("169.254.169.254")),
+        "post-load SSRF to IMDS must be blocked (C1); blocked_urls={blocked:?}"
+    );
+    assert!(
+        blocked.iter().any(|u| u.contains("/etc/hosts")),
+        "post-load local-file request must be blocked (C1); blocked_urls={blocked:?}"
+    );
+}
+
 /// Verify that ResourcePolicy is enforced via CDP Fetch interception.
 ///
 /// The test creates a temp HTML file that references two subresources:
