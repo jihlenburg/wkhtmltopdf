@@ -1,0 +1,8 @@
+<!doctype html><meta charset=utf-8><title>print-media-coloradjust</title>
+<style>
+.bg{background:#234 url() ;color:#fff;padding:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+@media screen{.only{color:green}} @media print{.only{color:red}.printmsg::after{content:" [print stylesheet active]"}}
+</style>
+<h1 class=printmsg>print media + color-adjust</h1>
+<div class=bg>dark background should print (print-color-adjust:exact)</div>
+<p class=only>this text is red in print, green on screen</p>

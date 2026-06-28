@@ -1,1 +1,4 @@
 /target
+# generated PDFs from compat harness
+tests/compat/out/
+tests/compat/out-*/
