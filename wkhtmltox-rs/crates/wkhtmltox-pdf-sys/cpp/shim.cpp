@@ -1,6 +1,7 @@
 // wkhtmltox-rs — LGPL-3.0-or-later.
 #include "shim.h"
 #include <string>
+#include <vector>
 #include <qpdf/QPDF.hh>
 #include <qpdf/QPDFWriter.hh>
 #include <qpdf/QPDFObjectHandle.hh>
@@ -67,5 +68,26 @@ extern "C" int wkx_pdf_add_text_field(const char* in_path, const char* out_path,
         return 1;
     } catch (...) {
         return 3; // unknown exception must not unwind across extern "C"
+    }
+}
+
+extern "C" int wkx_pdf_merge(const char** in_paths, int n, const char* out_path) {
+    try {
+        if (n <= 0) return 2;
+        QPDF out;
+        out.emptyPDF();
+        for (int i = 0; i < n; ++i) {
+            QPDF in;
+            in.processFile(in_paths[i]);
+            for (auto& page : QPDFPageDocumentHelper(in).getAllPages())
+                QPDFPageDocumentHelper(out).addPage(page, false);
+        }
+        QPDFWriter w(out, out_path);
+        w.write();
+        return 0;
+    } catch (const std::exception&) {
+        return 1;
+    } catch (...) {
+        return 2; // unknown exception must not unwind across extern "C"
     }
 }
