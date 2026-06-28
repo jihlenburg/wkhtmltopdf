@@ -317,3 +317,9 @@ Run 2026-06-28 on macOS arm64; Google Chrome 149; verification with PyMuPDF cros
 **Irreducible residual (documented):** pixel-perfect *pagination* on long/complex docs is not fully achievable without the original engine — line-breaking is engine-intrinsic. This is the only dimension where "identical" is out of reach.
 
 **Next milestone (new):** design + build the legacy-compat profile, driven by the oracle harness as the optimization target.
+
+### Compat profile v1 — measured result (2026-06-28)
+Implemented `--compat` (`LoadSettings.compat_ua_css` + `wkhtmltox_core::compat::WK0126_UA_RESET`, injected via CDP `Runtime.evaluate` as a `<style>` before print). Measured vs the 0.12.6 oracle:
+- Baseline corpus (6): mean SSIM **0.717 → 0.734** (+0.017); total page-drift **2 → 2** (unchanged); text 1.0.
+- Edge corpus (16): mean SSIM 0.833 → 0.834; page-drift 4 → 4.
+- **Verdict:** UA-reset gives a real-but-modest visual gain on unstyled/lightly-styled pages; **page-drift is font-metric-bound** (Chromium/FreeType vs Qt4-WebKit glyph widths → different line-break points), and author CSS out-specifies the injected reset. **CSS injection has reached diminishing returns.** The next fidelity lever is **font substitution** (a maintainer decision — may not help much, since both engines use the same system fonts). Security: post-feature audit clean (static HIGH=0; semantic review 0 findings); fixed RUSTSEC-2026-0187 (lopdf→0.42). Branch pushed: `fork/codex/macos-arm64-wkhtmltopdf` @ 840ab43.
