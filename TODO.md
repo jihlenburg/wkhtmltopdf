@@ -4,13 +4,12 @@ The autonomous milestone loop drives this list: each milestone runs
 plan → SDD execution → security audit → push → check off here + log in `logbook.md`.
 **Loop terminates when every item under "v1 critical path" is checked.**
 Each milestone is built test-first, validated against the wkhtmltopdf 0.12.6 oracle harness,
-and security-audited (`scripts/security-audit.sh` + `/security-review`) before push.
+and security-audited (`scripts/security-audit.sh` + review) before push.
 
 ## In progress
-- [ ] **M2a — Document assembly core**: probe/outline model, QPDF multi-doc merge, nested bookmarks, page-number footer, `assemble_pdf` converter wiring, oracle 2-doc validation.
+- [ ] **M2b — TOC + chrome**: per-heading EXACT page mapping (the §5.1 crux — parse each object's Chromium `generateDocumentOutline` destinations → global pages), TOC generation via libxslt (`--xsl-style-sheet`) + TOC fixed-point page-number loop, variable headers/footers (text `[section]`/`[title]`/`[date]` + HTML), cover page, clickable-link annotation synthesis (Chromium bug 347674894). Also address deferred M2a finding: inheritance-aware `/Resources` in `stamp_footer` when inputs broaden.
 
 ## v1 critical path (queued)
-- [ ] **M2b — TOC + chrome**: TOC generation via libxslt (`--xsl-style-sheet`), TOC fixed-point page-number loop, variable headers/footers (text + HTML), cover page, clickable-link annotation synthesis (Chromium bug 347674894).
 - [ ] **M3 — C ABI**: vendored `pdf.h`/`image.h` verbatim, `wkhtmltox-capi` cdylib (`extern "C"` exports, per-converter UTF-8 string cache, `catch_unwind` on every export), header-diff test, C consumer test under ASan.
 - [ ] **M3b — CLI**: wkhtmltopdf-compatible flag grammar (page-object positional model, repeatable two-arg flags), settings registry (names/defaults ported from upstream `reflect`), `--help`/`--extended-help`/`--manpage` generation.
 - [ ] **M4 — Networking + security policy**: cookies/custom-headers/proxy/auth via CDP; `ResourcePolicy` (scheme allowlist, `--allow`, redirect re-validation, SSRF private-range block) enforced at CDP `Fetch` interception; opt-in `--safe` profile.
@@ -25,6 +24,7 @@ and security-audited (`scripts/security-audit.sh` + `/security-review`) before p
 - [ ] SVG image output (legacy QtSvg feature)
 
 ## Done
-- [x] **M1 — Skeleton + Chromium renderer + AcroForm spike** (workspace, `Renderer` trait + `MockRenderer`, Chromium/CDP renderer w/ e2e, QPDF FFI, AcroForm risk retired, fidelity harness). See logbook.
+- [x] **M1 — Skeleton + Chromium renderer + AcroForm spike** (workspace, `Renderer` trait + `MockRenderer`, Chromium/CDP renderer w/ e2e, QPDF FFI, AcroForm risk retired, fidelity harness).
 - [x] **Security-audit hook** (`scripts/security-audit.sh` + PostToolUse hook; caught + fixed RUSTSEC-2026-0187).
-- [x] **Compat-profile v1** (`--compat` UA-reset; measured: SSIM 0.717→0.734, page-drift font-metric-bound).
+- [x] **Compat-profile v1** (`--compat` UA-reset; SSIM 0.717→0.734, page-drift font-metric-bound).
+- [x] **M2a — Document assembly core** (probe/outline model, QPDF multi-doc merge, nested bookmarks, page-number footer, `assemble_pdf` wiring; oracle: outline 12/12 titles match, text 0.9974, pages ±1; temp-dir CWE-377 hardened). Commits `74a331c..5088a8d`.

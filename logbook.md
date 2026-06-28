@@ -12,3 +12,5 @@ Chronological record of the autonomous build. Newest at bottom. Branch: `codex/m
 - Pushed through `7279083`.
 - **M2a (document assembly) started** (BASE `5b6f523`). Execution model: light controller check on low-risk pure-Rust tasks; full reviewer subagent on FFI/integration tasks; whole-milestone review + security audit + oracle validation before each push.
   - Task 1 ✅ `a3ec621` — outline model (probe JS + heading tree), 2/2 tests, clippy clean.
+  - Tasks 2–6 ✅ — QPDF merge `b2b7f78`, nested bookmarks `c45bf0f`, page-number footer `bb77a30`, `assemble_pdf` wiring `85ccc02`, oracle validation `575ac5f`.
+  - **M2a complete** (`5b6f523..5088a8d`). Opus milestone review: READY-WITH-FIXES, 0 Critical; injection via DOM titles/footer SAFE (qpdf escaping), FFI backstops verified. Fixed Important security finding: temp-dir CWE-377 → `tempfile::TempDir` (randomized, 0700, RAII cleanup) `5088a8d`. Oracle: outline 12/12 titles match, text 0.9974, pages within ±1. Static audit HIGH=0. Per-heading exact page mapping deferred to M2b (the §5.1 crux).
