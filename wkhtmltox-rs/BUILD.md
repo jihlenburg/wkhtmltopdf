@@ -113,7 +113,7 @@ cargo test --workspace
 ### License and dependency policy (cargo-deny)
 
 ```sh
-cargo deny check          # install: cargo install cargo-deny
+cargo deny check --config ../deny.toml          # install: cargo install cargo-deny
 ```
 
 ### Advisory scan (cargo-audit)

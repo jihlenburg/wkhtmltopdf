@@ -71,8 +71,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: wkhtmltox-rs
-      - name: Bundle chrome-headless-shell next to the render example
-        run: bash ../scripts/package.sh --no-chrome  # builds release bins
+      - name: Build the render example used by the compat gate
+        run: cargo build --example render -p wkhtmltox-render-chromium
       - name: Install a headless Chrome for the harness
         uses: browser-actions/setup-chrome@v1
         id: chrome

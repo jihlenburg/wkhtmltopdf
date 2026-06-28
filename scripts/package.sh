@@ -38,7 +38,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include"
 TARGET="$WS/target/release"
 cp "$TARGET/wkhtmltopdf" "$TARGET/wkhtmltoimage" "$STAGE/bin/"
 cp "$TARGET/libwkhtmltox.$DYLIB" "$STAGE/lib/"
-cp "$TARGET/libwkhtmltox.a" "$STAGE/lib/" 2>/dev/null || true
+cp "$TARGET/libwkhtmltox.a" "$STAGE/lib/"
 cp "$WS/crates/wkhtmltox-capi/include/pdf.h" "$WS/crates/wkhtmltox-capi/include/image.h" "$STAGE/include/"
 cp "$REPO_ROOT/LICENSE" "$STAGE/"
 
@@ -69,6 +69,7 @@ if [ "$SKIP_CHROME" -eq 0 ]; then
   unzip -q "$TMP/chs.zip" -d "$TMP"
   # Chrome for Testing unzips to chrome-headless-shell-<platform>/; flatten into bin/.
   SRC_DIR="$(find "$TMP" -maxdepth 1 -type d -name 'chrome-headless-shell-*' | head -1)"
+  [ -n "$SRC_DIR" ] || { echo "package.sh: unexpected chrome-headless-shell zip layout" >&2; exit 1; }
   cp -R "$SRC_DIR" "$STAGE/bin/chrome-headless-shell"
   # Ensure the launcher the discovery looks for is executable.
   chmod +x "$STAGE/bin/chrome-headless-shell/chrome-headless-shell" 2>/dev/null || true
