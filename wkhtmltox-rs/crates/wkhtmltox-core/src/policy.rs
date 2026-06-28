@@ -18,9 +18,23 @@
 //   destination URL rather than trusting the redirect chain.
 //
 // * `decide` stays pure (no network): it delegates to
-//   `decide_with_resolver(url, is_redirect, &NoopResolver)`.  The renderer
-//   supplies a real [`SystemResolver`] to catch DNS-rebinding and hostname
-//   aliases for private ranges.
+//   `decide_with_resolver(url, is_redirect, &NoopResolver)`.  Literal private
+//   IPs and well-known loopback hostname aliases (`localhost`, `.localhost`
+//   TLD, `ip6-localhost`, `ip6-loopback`) are blocked on this pure path
+//   without any resolver.
+//
+// * The renderer supplies a [`SystemResolver`] via `decide_with_resolver` to
+//   additionally block non-IP hostnames whose DNS records point at private
+//   ranges.  Note: [`SystemResolver`] performs a **blocking** OS lookup on
+//   the enforcement path, bounded by the OS resolver timeout plus the
+//   renderer's overall request deadline.
+//
+// * **Residual TOCTOU (active DNS-rebinding):** a host that resolves PUBLIC
+//   at our `decide_with_resolver` check but PRIVATE at Chrome's subsequent
+//   connect (TTL=0 flip) is still possible.  This CDP-subprocess architecture
+//   cannot pin the IP Chrome uses per-request.  A complete fix requires
+//   IP-pinning (URL rewrite for HTTP / `--host-resolver-rules`) or a
+//   controlled forward proxy; tracked as future work.
 
 /// Whether a URL request should be allowed or blocked, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -421,9 +435,12 @@ fn ip_addr_is_private(ip: std::net::IpAddr) -> bool {
 /// * Any other string (DNS name, etc.) — returns `false` without error.
 ///
 /// **DNS-rebinding note:** this function tests only the *literal* value of
-/// `host`; it does not perform DNS resolution.  A hostname that resolves to a
-/// private IP is therefore not caught here — that is a known post-v1
-/// limitation.
+/// `host`; it does not perform DNS resolution.  Non-IP hostnames that resolve
+/// to private ranges are caught instead by [`ResourcePolicy::decide_with_resolver`]
+/// when a real [`Resolver`] is supplied — the renderer uses [`SystemResolver`]
+/// for this purpose.  Active DNS-rebinding (a TTL=0 flip between our policy
+/// check and Chrome's connect) remains a residual risk; see the module-level
+/// design notes for the documented limitation and the path to a full fix.
 pub fn is_private_ip(host: &str) -> bool {
     let host = host.trim();
 

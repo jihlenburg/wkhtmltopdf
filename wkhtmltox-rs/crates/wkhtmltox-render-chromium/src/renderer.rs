@@ -136,11 +136,13 @@ pub enum FetchDecision {
 
 /// Map a `ResourcePolicy` decision to a `FetchDecision`.
 ///
-/// Pure helper — no I/O, no CDP calls.  Tests call this directly to verify
-/// the policy-to-action mapping without needing a real browser.
+/// Uses [`ResourcePolicy::decide_with_resolver`] with a [`SystemResolver`] so
+/// that non-IP hostnames whose DNS records point at private ranges are also
+/// blocked on the renderer's enforcement path.  No I/O is performed for
+/// non-http(s) schemes or literal-IP hosts (those are resolved purely).
 pub fn fetch_action(policy: &ResourcePolicy, url: &str, is_redirect: bool) -> FetchDecision {
     use wkhtmltox_core::policy::Decision;
-    match policy.decide(url, is_redirect) {
+    match policy.decide_with_resolver(url, is_redirect, &wkhtmltox_core::policy::SystemResolver) {
         Decision::Allow => FetchDecision::Continue,
         Decision::Block(_) => FetchDecision::Fail,
     }

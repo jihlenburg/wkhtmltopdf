@@ -431,6 +431,64 @@ fn snapshot_under_safe_policy_blocks_private_ip_subresource() {
     );
 }
 
+/// Policy test: a page that references `http://localhost:9/x` under the safe
+/// profile is blocked via the loopback-hostname alias rule (no DNS resolution
+/// needed) while the page itself still renders to a valid snapshot.
+///
+/// Port 9 is the IANA discard port — no external listener is required; the
+/// request is intercepted and killed before Chrome even connects.
+#[test]
+#[ignore = "requires a real Chrome; run with: cargo test -p wkhtmltox-render-chromium -- --ignored --test-threads=1"]
+fn snapshot_under_safe_blocks_localhost_subresource() {
+    use wkhtmltox_core::policy::ResourcePolicy;
+
+    let policy = ResourcePolicy {
+        allow_local_file: false,
+        allowed_paths: vec![],
+        block_private_ips: true,
+        allow_external_links: true,
+        allow_internal_links: true,
+    };
+    let load = LoadSettings {
+        enable_javascript: false,
+        policy,
+        ..Default::default()
+    };
+
+    // The img src targets localhost on the discard port.  Under --safe the
+    // loopback-hostname rule blocks it deterministically without DNS.
+    let html = concat!(
+        "data:text/html,<html><body>",
+        "<img src='http://localhost:9/x' alt='blocked'>",
+        "<h1>Safe snapshot (localhost block)</h1>",
+        "</body></html>",
+    );
+
+    let mut r = ChromiumRenderer::spawn().expect("spawn chrome");
+    let p = r.open(&Source::Url(html.into()), &load).expect("open");
+    r.wait_ready(p, &ReadyPolicy::default())
+        .expect("wait_ready");
+
+    // Snapshot must succeed even though the subresource was blocked.
+    let raw = r
+        .snapshot(p, &SnapshotOpts::default())
+        .expect("snapshot must succeed despite blocked localhost subresource");
+
+    assert_eq!(&raw.bytes[..4], b"\x89PNG", "snapshot must return PNG");
+    let decoded = ::image::load_from_memory(&raw.bytes).expect("PNG must decode");
+    assert!(
+        decoded.width() > 0 && decoded.height() > 0,
+        "dims must be > 0"
+    );
+
+    // The localhost image must appear in blocked_urls.
+    let blocked = r.blocked_urls();
+    assert!(
+        blocked.iter().any(|u| u.contains("localhost")),
+        "safe policy must have blocked the localhost subresource; blocked_urls={blocked:?}",
+    );
+}
+
 /// Verify that ResourcePolicy is enforced via CDP Fetch interception.
 ///
 /// The test creates a temp HTML file that references two subresources:
