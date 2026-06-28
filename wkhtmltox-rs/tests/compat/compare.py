@@ -95,7 +95,7 @@ parser.add_argument(
     help="Path to a JSON thresholds file (default: tests/compat/thresholds.json). "
          "Used only when --gate is specified.",
 )
-ARGS = parser.parse_known_args()[0]
+ARGS = parser.parse_args() if __name__ == "__main__" else parser.parse_args([])
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -997,6 +997,11 @@ def run_m2b_comparison():
     text_new = extract_text(new_doc)
     text_sim = text_similarity(text_ref, text_new)
 
+    # Body-only text similarity (skip leading TOC page + margin bands).
+    body_ref = extract_body_text(ref_doc, skip_toc=True)
+    body_new = extract_body_text(new_doc, skip_toc=True)
+    body_text_sim = text_similarity(body_ref, body_new)
+
     ref_doc.close()
     new_doc.close()
 
@@ -1011,6 +1016,7 @@ def run_m2b_comparison():
     print(f"  Only in oracle     : {sorted(set_ref - set_new)}")
     print(f"  Only in new        : {sorted(set_new - set_ref)}")
     print(f"  Text similarity    : {text_sim:.4f}")
+    print(f"  Body text sim      : {body_text_sim:.4f}")
 
     # --- build result dict ---
     result = {
@@ -1036,6 +1042,7 @@ def run_m2b_comparison():
         "toc_in_ref": toc_in_ref,
         "toc_in_new": toc_in_new,
         "text_sim": round(text_sim, 4),
+        "body_text_sim": round(body_text_sim, 4),
     }
 
     # --- write results-m2b.md ---
@@ -1100,9 +1107,14 @@ def run_m2b_comparison():
 
         ## Text Similarity
 
-        | Metric   | Value  |
-        |:---------|-------:|
-        | text_sim | {text_sim:.4f} |
+        | Metric        | Value  |
+        |:--------------|-------:|
+        | text_sim      | {text_sim:.4f} |
+        | body_text_sim | {body_text_sim:.4f} |
+
+        > `body_text_sim`: text similarity on body-only content (leading TOC page and
+        > header/footer margin bands excluded); isolates the body for a fair comparison
+        > when cover + TOC add chrome that inflates the full-document diff.
 
         ## Notes
 
@@ -1828,6 +1840,7 @@ def main():
             print(
                 f"    pages {r['pages_ref']}->{r['pages_new']}  "
                 f"text_sim={r['text_sim']:.3f}  "
+                f"body_sim={r['body_text_sim']:.3f}  "
                 f"mean_ssim={r['mean_ssim']:.3f}  "
                 f"score={r['score']:.3f}"
             )
