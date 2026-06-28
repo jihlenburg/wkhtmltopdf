@@ -1612,6 +1612,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
+name = "wkhtmltoimage-cli"
+version = "0.12.6"
+dependencies = [
+ "tempfile",
+ "wkhtmltox-core",
+ "wkhtmltox-render-chromium",
+]
+
+[[package]]
 name = "wkhtmltopdf-cli"
 version = "0.12.6"
 dependencies = [

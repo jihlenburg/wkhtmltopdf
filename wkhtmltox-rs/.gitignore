@@ -6,3 +6,7 @@ tests/compat/out-*/
 target/debug/consumer
 target/release/consumer
 *.pdf
+# generated images from wkhtmltoimage
+*.png
+*.jpg
+*.jpeg
