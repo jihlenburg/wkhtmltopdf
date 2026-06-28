@@ -479,6 +479,16 @@ fn assemble_with_toc(
     let mut outline_items: Vec<(String, u32, u8)> = Vec::new();
     let mut converged = false;
 
+    // Read the user XSL file once before the fixed-point loop so that each
+    // iteration reuses the already-read string rather than re-reading from disk.
+    let xsl_content: Option<String> = if let Some(xsl_path) = &opts.toc_xsl {
+        Some(std::fs::read_to_string(xsl_path).map_err(|e| {
+            WkError::Io(format!("cannot read --xsl-style-sheet {xsl_path:?}: {e}"))
+        })?)
+    } else {
+        None
+    };
+
     for _iter in 0..MAX_ITERS {
         // Recompute global (0-based) page offsets for every heading, assuming
         // the TOC occupies `toc_pages` pages placed after `cover_pages` pages.
@@ -497,12 +507,9 @@ fn assemble_with_toc(
             .iter()
             .map(|(t, g, l)| (t.clone(), g + 1, *l))
             .collect();
-        let toc_html = if let Some(xsl_path) = &opts.toc_xsl {
-            let xsl = std::fs::read_to_string(xsl_path).map_err(|e| {
-                WkError::Io(format!("cannot read --xsl-style-sheet {xsl_path:?}: {e}"))
-            })?;
+        let toc_html = if let Some(xsl) = &xsl_content {
             let xml = crate::tocxsl::outline_to_xml(&toc_display);
-            crate::tocxsl::transform_toc(r, &xml, &xsl)?
+            crate::tocxsl::transform_toc(r, &xml, xsl)?
         } else {
             crate::toc::render_toc_html(&toc_display, &opts.toc_settings)
         };

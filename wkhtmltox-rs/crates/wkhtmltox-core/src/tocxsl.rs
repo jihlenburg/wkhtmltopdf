@@ -83,7 +83,21 @@ pub fn xml_escape(s: &str) -> String {
 pub struct TocXslSettings {
     pub caption_text: String,
     pub use_dotted_lines: bool,
+    /// When `true`, emit `<a href="…">` links in the TOC pointing from each entry to its
+    /// heading anchor.
+    ///
+    /// **Note (deferred):** `outline_to_xml` does not yet emit `link` attributes on
+    /// `<item>` elements because the `__WKANCHOR` anchor infrastructure required for
+    /// TOC clickable-link wiring was deferred in M2b.  The generated outline XML
+    /// therefore never includes `link="…"`, so the default XSL's `@link` conditional
+    /// never fires and this toggle is currently accepted but does not change output.
+    /// Enabling this flag will take effect once anchor synthesis is wired in.
     pub forward_links: bool,
+    /// When `true`, each heading in the document links back to its TOC entry.
+    ///
+    /// **Note (deferred):** same as `forward_links` — `backLink` attribute emission
+    /// is deferred pending TOC anchor infrastructure.  This toggle is accepted but
+    /// currently does not change output.
     pub back_links: bool,
     pub indentation: String,
     pub font_scale: f64,
@@ -104,13 +118,56 @@ impl Default for TocXslSettings {
 /// Serialize the (title, 1-based page, level) entries to wkhtmltopdf's outline XML.
 /// Nesting is reconstructed from `level` with a stack: an entry deeper than the
 /// previous opens children; shallower/equal closes back to its level.
+///
+/// # Upstream compatibility: synthetic document-root `<item>`
+///
+/// The real wkhtmltopdf 0.12.6 binary ALWAYS wraps the real heading items inside a
+/// synthetic document-root `<item title="" page="0">…</item>` directly under
+/// `<outline>`.  The default TOC stylesheet relies on this via its selector
+/// `select="outline:item/outline:item"` — without the wrapper every top-level heading
+/// is a direct child of `<outline>` and is silently dropped.  This function therefore
+/// always emits that wrapper, matching upstream's schema exactly:
+///
+/// ```xml
+/// <outline xmlns="http://wkhtmltopdf.org/outline">
+///   <item title="" page="0">      <!-- synthetic root — always present -->
+///     <item title="Alpha" page="1"/>
+///     …
+///   </item>
+/// </outline>
+/// ```
+///
+/// When `entries` is empty the synthetic root is self-closed:
+/// `<item title="" page="0"/>`.
+///
+/// # Deferred: `link` / `backLink` attributes
+///
+/// This function does **not** emit `link` or `backLink` attributes on `<item>`
+/// elements.  The `__WKANCHOR` anchor infrastructure required for TOC clickable-link
+/// wiring was deferred in M2b.  Emitting empty `link=""`/`backLink=""` would create
+/// broken `href=""` links, so these attributes are omitted until anchor synthesis
+/// is implemented.  As a result the `forward_links` / `back_links` toggles on
+/// [`TocXslSettings`] are currently no-ops.
 pub fn outline_to_xml(entries: &[(String, u32, u8)]) -> String {
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     out.push_str("<outline xmlns=\"http://wkhtmltopdf.org/outline\">\n");
+
+    if entries.is_empty() {
+        // Upstream always emits the synthetic root even for empty outlines.
+        out.push_str("  <item title=\"\" page=\"0\"/>\n");
+        out.push_str("</outline>\n");
+        return out;
+    }
+
+    // Synthetic document-root required by upstream's default XSL selector
+    // `select="outline:item/outline:item"`.
+    out.push_str("  <item title=\"\" page=\"0\">\n");
+
     // open_levels holds the level of each currently-open (non-self-closed) <item>.
     let mut open_levels: Vec<u8> = Vec::new();
-    let indent = |n: usize| "  ".repeat(n + 1);
+    // Base indent is 2 (inside the synthetic root) plus one per open level.
+    let indent = |n: usize| "  ".repeat(n + 2);
     for (i, (title, page, level)) in entries.iter().enumerate() {
         // Close any open items at >= this level.
         while let Some(&top) = open_levels.last() {
@@ -140,6 +197,8 @@ pub fn outline_to_xml(entries: &[(String, u32, u8)]) -> String {
         out.push_str(&indent(open_levels.len()));
         out.push_str("</item>\n");
     }
+
+    out.push_str("  </item>\n");
     out.push_str("</outline>\n");
     out
 }
@@ -225,11 +284,21 @@ mod tests {
         let xml = outline_to_xml(&entries);
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
         assert!(xml.contains("<outline xmlns=\"http://wkhtmltopdf.org/outline\">"));
-        // Intro is a parent of Background (deeper level) → open/close form
+        // Upstream-compatible: synthetic root is always present.
+        assert!(xml.contains("<item title=\"\" page=\"0\">"));
+        // Intro is a parent of Background (deeper level) → open/close form;
+        // real items are now nested inside the synthetic root.
         assert!(xml.contains("<item title=\"Intro\" page=\"1\">"));
         assert!(xml.contains("<item title=\"Background\" page=\"2\"/>"));
-        // Method is a leaf at level 1 → self-closing
+        // Method is a leaf at level 1 → self-closing (inside synthetic root)
         assert!(xml.contains("<item title=\"Method\" page=\"3\"/>"));
+        // Intro and Background must appear AFTER the synthetic-root opening tag.
+        let root_pos = xml.find("<item title=\"\" page=\"0\">").unwrap();
+        let intro_pos = xml.find("<item title=\"Intro\"").unwrap();
+        assert!(
+            intro_pos > root_pos,
+            "Intro must be nested inside the synthetic root"
+        );
         assert!(xml.trim_end().ends_with("</outline>"));
     }
 
@@ -237,6 +306,55 @@ mod tests {
     fn outline_xml_escapes_titles() {
         let xml = outline_to_xml(&[("A & <B>".to_string(), 1, 1)]);
         assert!(xml.contains("title=\"A &amp; &lt;B&gt;\""));
+        // Escaped title must appear inside the synthetic root.
+        let root_pos = xml.find("<item title=\"\" page=\"0\">").unwrap();
+        let title_pos = xml.find("title=\"A &amp;").unwrap();
+        assert!(title_pos > root_pos, "escaped title must be inside the synthetic root");
+    }
+
+    #[test]
+    fn outline_xml_has_synthetic_root() {
+        // 1. Always contains the synthetic root.
+        let xml_multi = outline_to_xml(&[
+            ("Alpha".to_string(), 1u32, 1u8),
+            ("Alpha-Sub".to_string(), 2, 2),
+            ("Beta".to_string(), 3, 1),
+        ]);
+        assert!(
+            xml_multi.contains("<item title=\"\" page=\"0\">"),
+            "multi-entry: synthetic root must be present"
+        );
+        // Real items must appear after the synthetic root opening tag.
+        let root_pos = xml_multi.find("<item title=\"\" page=\"0\">").unwrap();
+        let alpha_pos = xml_multi.find("<item title=\"Alpha\"").unwrap();
+        assert!(
+            alpha_pos > root_pos,
+            "Alpha must be nested inside the synthetic root, not a direct child of <outline>"
+        );
+
+        // 2. Single-heading input: heading nested inside root, not direct child of <outline>.
+        let xml_single = outline_to_xml(&[("OnlyOne".to_string(), 1u32, 1u8)]);
+        assert!(
+            xml_single.contains("<item title=\"\" page=\"0\">"),
+            "single-entry: synthetic root must be present (open form)"
+        );
+        let root_pos_s = xml_single.find("<item title=\"\" page=\"0\">").unwrap();
+        let heading_pos_s = xml_single.find("<item title=\"OnlyOne\"").unwrap();
+        assert!(
+            heading_pos_s > root_pos_s,
+            "single heading must be nested inside the synthetic root"
+        );
+
+        // 3. Empty input: synthetic root is self-closed.
+        let xml_empty = outline_to_xml(&[]);
+        assert!(
+            xml_empty.contains("<item title=\"\" page=\"0\"/>"),
+            "empty input: synthetic root must be self-closed"
+        );
+        assert!(
+            !xml_empty.contains("<item title=\"\" page=\"0\">"),
+            "empty input: synthetic root must NOT be open-form"
+        );
     }
 
     #[test]
