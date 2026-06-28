@@ -1,0 +1,103 @@
+{
+  "results": [
+    {
+      "name": "cssbox",
+      "error": null,
+      "pages_ref": 1,
+      "pages_new": 1,
+      "delta_pages": 0,
+      "text_sim": 1.0,
+      "outline_ref": 1,
+      "outline_new": 1,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.8007,
+      "min_ssim": 0.8007,
+      "pixel_diff_pct": 4.423,
+      "score": 0.9336
+    },
+    {
+      "name": "fonts",
+      "error": null,
+      "pages_ref": 1,
+      "pages_new": 1,
+      "delta_pages": 0,
+      "text_sim": 1.0,
+      "outline_ref": 1,
+      "outline_new": 1,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.867,
+      "min_ssim": 0.867,
+      "pixel_diff_pct": 2.239,
+      "score": 0.9557
+    },
+    {
+      "name": "headings",
+      "error": null,
+      "pages_ref": 1,
+      "pages_new": 2,
+      "delta_pages": 1,
+      "text_sim": 1.0,
+      "outline_ref": 11,
+      "outline_new": 11,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.6094,
+      "min_ssim": 0.6094,
+      "pixel_diff_pct": 9.448,
+      "score": 0.5365
+    },
+    {
+      "name": "longtext",
+      "error": null,
+      "pages_ref": 2,
+      "pages_new": 3,
+      "delta_pages": 1,
+      "text_sim": 1.0,
+      "outline_ref": 1,
+      "outline_new": 1,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.4303,
+      "min_ssim": 0.4079,
+      "pixel_diff_pct": 13.203,
+      "score": 0.6434
+    },
+    {
+      "name": "table",
+      "error": null,
+      "pages_ref": 1,
+      "pages_new": 1,
+      "delta_pages": 0,
+      "text_sim": 1.0,
+      "outline_ref": 1,
+      "outline_new": 1,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.837,
+      "min_ssim": 0.837,
+      "pixel_diff_pct": 3.723,
+      "score": 0.9457
+    },
+    {
+      "name": "text",
+      "error": null,
+      "pages_ref": 1,
+      "pages_new": 1,
+      "delta_pages": 0,
+      "text_sim": 1.0,
+      "outline_ref": 1,
+      "outline_new": 1,
+      "outline_ratio": 1.0,
+      "mean_ssim": 0.7601,
+      "min_ssim": 0.7601,
+      "pixel_diff_pct": 5.5,
+      "score": 0.92
+    }
+  ],
+  "aggregate": {
+    "n": 6,
+    "mean_text_sim": 1.0,
+    "mean_ssim": 0.7174,
+    "min_ssim_overall": 0.4079,
+    "mean_pixel_diff_pct": 6.423,
+    "mean_score": 0.8225,
+    "total_page_delta": 2
+  }
+}

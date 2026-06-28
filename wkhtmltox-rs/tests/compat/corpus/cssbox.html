@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CSS Box Model Test</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; font-size: 11pt; margin: 0; padding: 0; }
+  h1 { font-size: 16pt; margin-bottom: 10pt; }
+  .box { border: 2pt solid #555; background-color: #e8f0fe; margin: 8pt 0; padding: 10pt; }
+  .box-red { border: 2pt solid #c00; background-color: #ffe0e0; }
+  .box-green { border: 2pt solid #080; background-color: #e0ffe0; }
+  .box-blue { border: 2pt solid #00c; background-color: #e0e0ff; }
+  .flex-row { display: flex; gap: 8pt; margin-top: 12pt; }
+  .flex-item { flex: 1; border: 2pt solid #888; padding: 8pt; background-color: #f8f8f8; text-align: center; }
+  .nested { margin: 6pt; padding: 6pt; border: 1pt dashed #999; background-color: #fff; }
+</style>
+</head>
+<body>
+<h1>CSS Box Model and Flex Layout</h1>
+
+<div class="box">
+  <strong>Box A</strong> — default style (blue-grey border, light blue fill)
+  <div class="nested">Nested inner box with dashed border and white background.</div>
+</div>
+
+<div class="box box-red">
+  <strong>Box B</strong> — red border, red fill. Padding: 10pt. Margin below: 8pt.
+</div>
+
+<div class="box box-green">
+  <strong>Box C</strong> — green border, green fill. Demonstrates stacking of margin + border + padding.
+</div>
+
+<div class="box box-blue">
+  <strong>Box D</strong> — blue border, blue fill. Wide border (2pt solid).
+</div>
+
+<div class="flex-row">
+  <div class="flex-item">Flex Item 1<br>flex: 1</div>
+  <div class="flex-item">Flex Item 2<br>flex: 1</div>
+  <div class="flex-item">Flex Item 3<br>flex: 1</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Table Test</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; font-size: 11pt; margin: 0; padding: 0; }
+  h1 { font-size: 16pt; margin-bottom: 10pt; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10pt; }
+  th, td { border: 1pt solid #333; padding: 5pt 8pt; text-align: left; }
+  th { background-color: #d0d0d0; font-weight: bold; }
+  tr:nth-child(even) td { background-color: #f4f4f4; }
+  caption { font-weight: bold; margin-bottom: 6pt; text-align: left; font-size: 12pt; }
+</style>
+</head>
+<body>
+<h1>Data Table — Styled with Borders</h1>
+<table>
+  <caption>Quarterly Revenue by Region (USD thousands)</caption>
+  <thead>
+    <tr><th>Region</th><th>Q1</th><th>Q2</th><th>Q3</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>North America</td><td>1,230</td><td>1,450</td><td>1,380</td></tr>
+    <tr><td>Europe</td><td>980</td><td>1,100</td><td>1,050</td></tr>
+    <tr><td>Asia Pacific</td><td>760</td><td>890</td><td>920</td></tr>
+    <tr><td>Latin America</td><td>340</td><td>410</td><td>390</td></tr>
+    <tr><td>Middle East</td><td>220</td><td>260</td><td>240</td></tr>
+    <tr><td>Africa</td><td>120</td><td>150</td><td>140</td></tr>
+    <tr><td>Oceania</td><td>180</td><td>200</td><td>210</td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>3,830</strong></td><td><strong>4,460</strong></td><td><strong>4,330</strong></td></tr>
+  </tbody>
+</table>
+</body>
+</html>
