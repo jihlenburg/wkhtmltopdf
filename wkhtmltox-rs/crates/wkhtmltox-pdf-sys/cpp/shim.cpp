@@ -12,5 +12,7 @@ extern "C" int wkx_pdf_roundtrip(const char* in_path, const char* out_path) {
         return 0;
     } catch (std::exception& e) {
         return 1;
+    } catch (...) {
+        return 2; // unknown exception must not unwind across extern "C"
     }
 }
