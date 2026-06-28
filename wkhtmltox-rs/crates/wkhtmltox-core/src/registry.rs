@@ -325,6 +325,233 @@ pub fn set_object(o: &mut PdfObjectSettings, name: &str, value: &str) -> Result<
 }
 
 // ---------------------------------------------------------------------------
+// Getters
+// ---------------------------------------------------------------------------
+
+/// Return the current string representation of a global-settings field.
+///
+/// Returns `Some(value_string)` when `name` is a known wkhtmltopdf setting
+/// (even if recognised-but-unimplemented — those return an empty string as the
+/// default value).  Returns `None` for unknown names.
+pub fn get_global(g: &GlobalSettings, name: &str) -> Option<String> {
+    let v: String = match name {
+        // ── size ──────────────────────────────────────────────────────────
+        "size.pageSize" => named_page_size_as_str(g.page_size).to_owned(),
+        "size.width" => g
+            .page_width_mm
+            .map(|mm| format!("{mm}mm"))
+            .unwrap_or_default(),
+        "size.height" => g
+            .page_height_mm
+            .map(|mm| format!("{mm}mm"))
+            .unwrap_or_default(),
+
+        // ── margins ───────────────────────────────────────────────────────
+        "margin.top" => format!("{}mm", g.margin_top_mm),
+        "margin.bottom" => format!("{}mm", g.margin_bottom_mm),
+        "margin.left" => format!("{}mm", g.margin_left_mm),
+        "margin.right" => format!("{}mm", g.margin_right_mm),
+
+        // ── layout ────────────────────────────────────────────────────────
+        "orientation" => match g.orientation {
+            Orientation::Portrait => "Portrait",
+            Orientation::Landscape => "Landscape",
+        }
+        .to_owned(),
+        "dpi" => g.dpi.to_string(),
+        "imageDPI" => g.image_dpi.to_string(),
+        "imageQuality" => g.image_quality.to_string(),
+        "colorMode" => match g.color_mode {
+            ColorMode::Color => "color",
+            ColorMode::Grayscale => "grayscale",
+        }
+        .to_owned(),
+        "zoom" | "load.zoomFactor" => g.zoom.to_string(),
+
+        // ── web rendering ─────────────────────────────────────────────────
+        "web.printMediaType" => g.print_media_type.to_string(),
+        "web.enableJavascript" => g.enable_javascript.to_string(),
+        "web.background" => g.print_background.to_string(),
+
+        // ── load ──────────────────────────────────────────────────────────
+        "load.jsdelay" => g.javascript_delay_ms.to_string(),
+
+        // ── header ────────────────────────────────────────────────────────
+        "header.left" => g.header.left.clone(),
+        "header.center" => g.header.center.clone(),
+        "header.right" => g.header.right.clone(),
+        "header.fontSize" => g.header.font_size.to_string(),
+        "header.line" => g.header.line.to_string(),
+
+        // ── footer ────────────────────────────────────────────────────────
+        "footer.left" => g.footer.left.clone(),
+        "footer.center" => g.footer.center.clone(),
+        "footer.right" => g.footer.right.clone(),
+        "footer.fontSize" => g.footer.font_size.to_string(),
+        "footer.line" => g.footer.line.to_string(),
+
+        // ── document structure ────────────────────────────────────────────
+        "toc" => g.produce_toc.to_string(),
+        "outline" => g.produce_outline.to_string(),
+        "outlineDepth" => g.outline_depth.to_string(),
+        "documentTitle" => g.document_title.clone(),
+        "out" => g.output_path.clone(),
+        "cover" => g.cover.clone().unwrap_or_default(),
+
+        // ── recognised-but-unimplemented → return empty default ───────────
+        "logLevel"
+        | "quiet"
+        | "useGraphics"
+        | "resolveRelativeLinks"
+        | "resolution"
+        | "pageOffset"
+        | "copies"
+        | "collate"
+        | "dumpOutline"
+        | "useCompression"
+        | "viewportSize"
+        | "load.cookieJar"
+        | "web.enableIntelligentShrinking"
+        | "web.minimumFontSize"
+        | "web.defaultEncoding"
+        | "web.userStyleSheet"
+        | "web.enablePlugins"
+        | "web.loadImages"
+        | "header.htmlUrl"
+        | "header.fontName"
+        | "header.spacing"
+        | "footer.htmlUrl"
+        | "footer.fontName"
+        | "footer.spacing" => String::new(),
+
+        // ── unknown ───────────────────────────────────────────────────────
+        _ => return None,
+    };
+    Some(v)
+}
+
+/// Return the current string representation of a per-object settings field.
+///
+/// Semantics mirror [`get_global`].
+pub fn get_object(o: &PdfObjectSettings, name: &str) -> Option<String> {
+    let v: String = match name {
+        // ── source ────────────────────────────────────────────────────────
+        "page" => o.page.clone(),
+
+        // ── web ───────────────────────────────────────────────────────────
+        "web.printMediaType" => o.print_media_type.to_string(),
+        "web.enableJavascript" => o.enable_javascript.to_string(),
+        "web.background" => o.print_background.to_string(),
+
+        // ── load ──────────────────────────────────────────────────────────
+        "load.jsdelay" => o.javascript_delay_ms.to_string(),
+        "load.zoomFactor" => o.zoom.to_string(),
+        "load.username" => o.username.clone(),
+        "load.password" => o.password.clone(),
+
+        // ── header ────────────────────────────────────────────────────────
+        "header.left" => o.header.left.clone(),
+        "header.center" => o.header.center.clone(),
+        "header.right" => o.header.right.clone(),
+        "header.fontSize" => o.header.font_size.to_string(),
+        "header.line" => o.header.line.to_string(),
+
+        // ── footer ────────────────────────────────────────────────────────
+        "footer.left" => o.footer.left.clone(),
+        "footer.center" => o.footer.center.clone(),
+        "footer.right" => o.footer.right.clone(),
+        "footer.fontSize" => o.footer.font_size.to_string(),
+        "footer.line" => o.footer.line.to_string(),
+
+        // ── structural flags ──────────────────────────────────────────────
+        "includeInOutline" => o.include_in_outline.to_string(),
+        "pagesCount" => o.pages_count.to_string(),
+        "isTableOfContent" => o.is_table_of_content.to_string(),
+
+        // ── recognised-but-unimplemented → return empty default ───────────
+        "toc.useDottedLines"
+        | "toc.captionText"
+        | "toc.forwardLinks"
+        | "toc.backLinks"
+        | "toc.indentation"
+        | "toc.fontScale"
+        | "useExternalLinks"
+        | "useLocalLinks"
+        | "replacements"
+        | "produceForms"
+        | "tocXsl"
+        | "load.proxy"
+        | "load.cookieJar"
+        | "load.customHeaders"
+        | "load.repeatCustomHeaders"
+        | "load.cookies"
+        | "load.post"
+        | "load.blockLocalFileAccess"
+        | "load.stopSlowScripts"
+        | "load.debugJavascript"
+        | "load.loadErrorHandling"
+        | "load.mediaLoadErrorHandling"
+        | "load.runScript"
+        | "load.cacheDir"
+        | "load.clientSslKeyPath"
+        | "load.clientSslKeyPassword"
+        | "load.clientSslCrtPath"
+        | "web.enableIntelligentShrinking"
+        | "web.minimumFontSize"
+        | "web.defaultEncoding"
+        | "web.userStyleSheet"
+        | "web.enablePlugins"
+        | "web.loadImages"
+        | "header.htmlUrl"
+        | "header.fontName"
+        | "header.spacing"
+        | "footer.htmlUrl"
+        | "footer.fontName"
+        | "footer.spacing" => String::new(),
+
+        // ── unknown ───────────────────────────────────────────────────────
+        _ => return None,
+    };
+    Some(v)
+}
+
+/// Map a `NamedPageSize` to its canonical wkhtmltopdf string representation.
+fn named_page_size_as_str(ps: NamedPageSize) -> &'static str {
+    match ps {
+        NamedPageSize::A0 => "A0",
+        NamedPageSize::A1 => "A1",
+        NamedPageSize::A2 => "A2",
+        NamedPageSize::A3 => "A3",
+        NamedPageSize::A4 => "A4",
+        NamedPageSize::A5 => "A5",
+        NamedPageSize::A6 => "A6",
+        NamedPageSize::A7 => "A7",
+        NamedPageSize::A8 => "A8",
+        NamedPageSize::A9 => "A9",
+        NamedPageSize::B0 => "B0",
+        NamedPageSize::B1 => "B1",
+        NamedPageSize::B2 => "B2",
+        NamedPageSize::B3 => "B3",
+        NamedPageSize::B4 => "B4",
+        NamedPageSize::B5 => "B5",
+        NamedPageSize::B6 => "B6",
+        NamedPageSize::B7 => "B7",
+        NamedPageSize::B8 => "B8",
+        NamedPageSize::B9 => "B9",
+        NamedPageSize::B10 => "B10",
+        NamedPageSize::C5E => "C5E",
+        NamedPageSize::Comm10E => "Comm10E",
+        NamedPageSize::DLE => "DLE",
+        NamedPageSize::Executive => "Executive",
+        NamedPageSize::Folio => "Folio",
+        NamedPageSize::Ledger => "Ledger",
+        NamedPageSize::Legal => "Legal",
+        NamedPageSize::Letter => "Letter",
+        NamedPageSize::Tabloid => "Tabloid",
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
@@ -507,6 +734,49 @@ mod tests {
         let mut o = PdfObjectSettings::default();
         set_object(&mut o, "toc.useDottedLines", "false").unwrap();
         assert!(!o.warnings.is_empty());
+    }
+
+    // --- Getters ---
+
+    #[test]
+    fn get_global_known_name_returns_value() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "size.pageSize", "Letter").unwrap();
+        assert_eq!(get_global(&g, "size.pageSize"), Some("Letter".to_owned()));
+    }
+
+    #[test]
+    fn get_global_unknown_name_returns_none() {
+        let g = GlobalSettings::default();
+        assert_eq!(get_global(&g, "no.such.thing"), None);
+    }
+
+    #[test]
+    fn get_global_unimplemented_name_returns_empty_string() {
+        let g = GlobalSettings::default();
+        assert_eq!(get_global(&g, "logLevel"), Some(String::new()));
+    }
+
+    #[test]
+    fn get_global_margin_roundtrip() {
+        let mut g = GlobalSettings::default();
+        set_global(&mut g, "margin.top", "20mm").unwrap();
+        // get_global returns "20mm" (stored as f64 20.0)
+        let v = get_global(&g, "margin.top").unwrap();
+        assert!(v.contains("20"), "expected '20' in '{v}'");
+    }
+
+    #[test]
+    fn get_object_page_roundtrip() {
+        let mut o = PdfObjectSettings::default();
+        set_object(&mut o, "page", "https://example.com").unwrap();
+        assert_eq!(get_object(&o, "page"), Some("https://example.com".to_owned()));
+    }
+
+    #[test]
+    fn get_object_unknown_returns_none() {
+        let o = PdfObjectSettings::default();
+        assert_eq!(get_object(&o, "totally.unknown"), None);
     }
 
     /// take_warnings drains the list.

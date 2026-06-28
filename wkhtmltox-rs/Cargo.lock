@@ -1548,9 +1548,10 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "wkhtmltox-capi"
-version = "0.0.0"
+version = "0.12.6"
 dependencies = [
  "lopdf",
+ "tempfile",
  "wkhtmltox-core",
  "wkhtmltox-pdf-sys",
  "wkhtmltox-render-chromium",
