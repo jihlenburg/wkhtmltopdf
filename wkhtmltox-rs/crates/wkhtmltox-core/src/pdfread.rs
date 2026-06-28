@@ -5,7 +5,7 @@
 //   - /Outlines bookmark tree → exact per-heading page numbers (Chromium path).
 //   - /Names /Dests name-tree + /Dests flat dict → named destination → page index map.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use lopdf::{Document, Object};
@@ -52,7 +52,7 @@ pub fn extract_named_dests(pdf_path: &Path) -> HashMap<String, u32> {
 
     // ── Path 1: /Names /Dests name-tree ──────────────────────────────────────
     if let Some(root_id) = catalog_names_dests_root(&doc) {
-        walk_name_tree(&doc, root_id, &page_map, &mut result);
+        walk_name_tree(&doc, root_id, &page_map, &mut result, &mut HashSet::new(), 0);
     }
 
     // ── Path 2: /Dests flat dict in catalog (legacy) ─────────────────────────
@@ -82,12 +82,23 @@ fn catalog_names_dests_root(doc: &Document) -> Option<lopdf::ObjectId> {
 
 /// Walk a name-tree node (and its descendants) rooted at `node_id`, inserting
 /// `name → page_index` pairs into `out`.
+///
+/// `visited` and `depth` guard against cyclic object graphs and pathologically
+/// deep trees: a node already in `visited` is silently skipped; recursion is
+/// capped at `MAX_DEPTH`.  Behaviour on valid (acyclic) input is unchanged.
 fn walk_name_tree(
     doc: &Document,
     node_id: lopdf::ObjectId,
     page_map: &HashMap<lopdf::ObjectId, u32>,
     out: &mut HashMap<String, u32>,
+    visited: &mut HashSet<lopdf::ObjectId>,
+    depth: u32,
 ) {
+    const MAX_DEPTH: u32 = 64;
+    if depth > MAX_DEPTH || !visited.insert(node_id) {
+        return;
+    }
+
     // Extract /Names pairs and /Kids refs as owned data so the borrow on `doc`
     // is released before the recursive call.
     let (name_pairs, kid_refs) = {
@@ -132,7 +143,7 @@ fn walk_name_tree(
     }
 
     for kid_id in kid_refs {
-        walk_name_tree(doc, kid_id, page_map, out);
+        walk_name_tree(doc, kid_id, page_map, out, visited, depth + 1);
     }
 }
 
@@ -236,21 +247,38 @@ pub fn extract_outline(pdf_path: &Path) -> Vec<(String, u32, u8)> {
     // Outlines-dict borrow released here.
 
     let mut result = Vec::new();
-    walk_outline(&doc, first_ref, 1, &page_id_to_index, &mut result);
+    walk_outline(&doc, first_ref, 1, &page_id_to_index, &mut result, &mut HashSet::new(), 0);
     result
 }
 
 /// Depth-first walk starting at `start_ref` (a sibling chain) at the given `level`.
 /// Pushes `(title, page_0based, level)` for each item that has a valid title and dest.
+///
+/// `visited` tracks every ObjectId we have entered; a node already present is skipped
+/// immediately (breaks the /Next chain or prevents re-entering a /First child), guarding
+/// against cyclic object graphs.  `depth` caps the recursion to `MAX_DEPTH` levels as a
+/// belt-and-suspenders defence against stack overflow.  Behaviour on valid input is
+/// unchanged.
 fn walk_outline(
     doc: &Document,
     start_ref: lopdf::ObjectId,
     level: u8,
     page_id_to_index: &HashMap<lopdf::ObjectId, u32>,
     out: &mut Vec<(String, u32, u8)>,
+    visited: &mut HashSet<lopdf::ObjectId>,
+    depth: u32,
 ) {
+    const MAX_DEPTH: u32 = 64;
+    if depth > MAX_DEPTH {
+        return;
+    }
     let mut current_ref = start_ref;
     loop {
+        // Cycle guard: if we've already visited this node, stop following /Next.
+        if !visited.insert(current_ref) {
+            break;
+        }
+
         // Extract all needed values as owned data so the borrow of `doc` is released
         // before the recursive call and the next iteration.
         let (title, page_0based, first_child, next_sibling) = {
@@ -291,7 +319,7 @@ fn walk_outline(
 
         // Recurse into children before advancing to the next sibling.
         if let Some(child_ref) = first_child {
-            walk_outline(doc, child_ref, level.saturating_add(1), page_id_to_index, out);
+            walk_outline(doc, child_ref, level.saturating_add(1), page_id_to_index, out, visited, depth + 1);
         }
 
         match next_sibling {
@@ -377,6 +405,78 @@ mod tests {
             Some(2),
             "named dest 'x' must resolve to 0-based page index 2"
         );
+    }
+
+    /// Build a minimal PDF whose only outline item has `/Next` pointing back to
+    /// itself (self-referential cycle).  Used to regression-test that
+    /// `extract_outline` terminates.
+    ///
+    /// Object layout:
+    ///   1 – Catalog  (/Pages 2 0 R  /Outlines 5 0 R)
+    ///   2 – Pages    (/Kids [3 0 R]  /Count 1)
+    ///   3 – Page 1
+    ///   4 – unused (keeps offset array contiguous)
+    ///   5 – Outlines dict  (/First 6 0 R)
+    ///   6 – Item A  (/Title (A) /Dest [3 0 R /XYZ 0 0 0] /Next 6 0 R)
+    ///        ^^^ /Next is self-referential
+    fn build_cyclic_outline_pdf() -> Vec<u8> {
+        const N: usize = 6;
+        let mut buf = String::new();
+        buf.push_str("%PDF-1.4\n");
+        let mut offsets = vec![0usize; N + 1]; // index 0 unused
+
+        offsets[1] = buf.len();
+        buf.push_str("1 0 obj\n<</Type/Catalog/Pages 2 0 R/Outlines 5 0 R>>\nendobj\n");
+
+        offsets[2] = buf.len();
+        buf.push_str("2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n");
+
+        offsets[3] = buf.len();
+        buf.push_str("3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>\nendobj\n");
+
+        // Object 4: placeholder so the xref stays contiguous.
+        offsets[4] = buf.len();
+        buf.push_str("4 0 obj\nnull\nendobj\n");
+
+        offsets[5] = buf.len();
+        buf.push_str("5 0 obj\n<</Type/Outlines/First 6 0 R>>\nendobj\n");
+
+        offsets[6] = buf.len();
+        // /Next 6 0 R  ←  self-cycle
+        buf.push_str("6 0 obj\n<</Title(A)/Dest[3 0 R /XYZ 0 0 0]/Next 6 0 R>>\nendobj\n");
+
+        let xref_offset = buf.len();
+        buf.push_str(&format!("xref\n0 {}\n", N + 1));
+        buf.push_str("0000000000 65535 f \n");
+        for i in 1..=N {
+            buf.push_str(&format!("{:010} 00000 n \n", offsets[i]));
+        }
+        buf.push_str(&format!(
+            "trailer\n<</Size {}/Root 1 0 R>>\nstartxref\n{}\n%%EOF\n",
+            N + 1,
+            xref_offset
+        ));
+
+        buf.into_bytes()
+    }
+
+    /// A cyclic /Next reference must not cause an infinite loop: the visited-set
+    /// guard must break the chain after the first visit to each node.
+    #[test]
+    fn extract_outline_cyclic_next_does_not_hang() {
+        let tmp = std::env::temp_dir()
+            .join(format!("wkx_cyclic_outline_{}.pdf", std::process::id()));
+        std::fs::write(&tmp, build_cyclic_outline_pdf()).unwrap();
+
+        // Must return immediately; a regression would spin forever (CI timeout
+        // would catch it, but the visited-set prevents that).
+        let result = extract_outline(&tmp);
+        let _ = std::fs::remove_file(&tmp);
+
+        // Item A appears exactly once despite the self-referential /Next.
+        assert_eq!(result.len(), 1, "cyclic /Next must not produce duplicates");
+        assert_eq!(result[0].0, "A", "item title must be A");
+        assert_eq!(result[0].2, 1, "item must be at outline level 1");
     }
 
     #[test]
