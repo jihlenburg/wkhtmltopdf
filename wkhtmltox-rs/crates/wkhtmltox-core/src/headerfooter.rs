@@ -12,16 +12,28 @@ pub struct PageCtx {
     pub topage: u32,
     /// 1-based number of the first page (typically 1).
     pub frompage: u32,
+    /// URL of the HTML page being converted (empty if not available).
+    pub webpage: String,
     /// Active level-1 outline section title (empty if none precedes this page).
     pub section: String,
     /// Active level-2 outline subsection title (empty if none precedes this page).
     pub subsection: String,
-    /// Document title passed via `AssembleOpts::doc_title`.
-    pub title: String,
+    /// Active level-3 outline subsubsection title (empty if none precedes this page).
+    pub subsubsection: String,
     /// Current date, UTC, formatted as `YYYY-MM-DD`.
     pub date: String,
+    /// Current date in ISO 8601 format (`YYYY-MM-DD`), same as `date`.
+    pub isodate: String,
     /// Current time, UTC, formatted as `HH:MM:SS`.
     pub time: String,
+    /// Document title passed via `AssembleOpts::doc_title`.
+    pub title: String,
+    /// Overall document title (same as `title` for single-input documents).
+    pub doctitle: String,
+    /// 1-based page number within the current input document ("site").
+    pub sitepage: u32,
+    /// Total number of pages in the current input document ("site").
+    pub sitepages: u32,
 }
 
 /// Substitute all recognised tokens in `template` with values from `ctx`.
@@ -42,6 +54,94 @@ pub fn substitute(template: &str, ctx: &PageCtx) -> String {
         .replace("[title]", &ctx.title)
         .replace("[date]", &ctx.date)
         .replace("[time]", &ctx.time)
+}
+
+/// Percent-encode a string value for inclusion in a URL query component.
+///
+/// Encodes: space → `%20`, `%` → `%25`, `&` → `%26`, `+` → `%2B`,
+/// `=` → `%3D`, `?` → `%3F`, `#` → `%23`, and any non-ASCII byte → `%XX`.
+/// Other printable ASCII characters are left as-is.
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for byte in s.bytes() {
+        match byte {
+            b'%' => out.push_str("%25"),
+            b'&' => out.push_str("%26"),
+            b'+' => out.push_str("%2B"),
+            b'=' => out.push_str("%3D"),
+            b'?' => out.push_str("%3F"),
+            b'#' => out.push_str("%23"),
+            b' ' => out.push_str("%20"),
+            0x21..=0x7E => out.push(byte as char),
+            b => {
+                let hi = b >> 4;
+                let lo = b & 0xF;
+                out.push('%');
+                out.push(char::from_digit(u32::from(hi), 16).unwrap().to_ascii_uppercase());
+                out.push(char::from_digit(u32::from(lo), 16).unwrap().to_ascii_uppercase());
+            }
+        }
+    }
+    out
+}
+
+/// Build the URL that will be loaded for an HTML header or footer, with all
+/// wkhtmltopdf per-page variables appended as URL-encoded query parameters.
+///
+/// The 13 standard parameters are appended in upstream order:
+/// `page`, `frompage`, `topage`, `webpage`, `section`, `subsection`,
+/// `subsubsection`, `date`, `isodate`, `time`, `title`, `doctitle`,
+/// `sitepage`, `sitepages`.
+///
+/// Any `replacements` (`--replace name value` pairs) are appended after the
+/// standard parameters.
+///
+/// If `base_url` already contains a `?`, the parameters are appended with
+/// `&`; otherwise a `?` separator is used.
+pub fn header_footer_query(
+    base_url: &str,
+    ctx: &PageCtx,
+    replacements: &[(String, String)],
+) -> String {
+    let sep = if base_url.contains('?') { '&' } else { '?' };
+
+    let pairs: [(&str, String); 14] = [
+        ("page", ctx.page.to_string()),
+        ("frompage", ctx.frompage.to_string()),
+        ("topage", ctx.topage.to_string()),
+        ("webpage", percent_encode(&ctx.webpage)),
+        ("section", percent_encode(&ctx.section)),
+        ("subsection", percent_encode(&ctx.subsection)),
+        ("subsubsection", percent_encode(&ctx.subsubsection)),
+        ("date", percent_encode(&ctx.date)),
+        ("isodate", percent_encode(&ctx.isodate)),
+        ("time", percent_encode(&ctx.time)),
+        ("title", percent_encode(&ctx.title)),
+        ("doctitle", percent_encode(&ctx.doctitle)),
+        ("sitepage", ctx.sitepage.to_string()),
+        ("sitepages", ctx.sitepages.to_string()),
+    ];
+
+    let mut url = String::with_capacity(base_url.len() + 256);
+    url.push_str(base_url);
+    url.push(sep);
+    let mut first = true;
+    for (k, v) in &pairs {
+        if !first {
+            url.push('&');
+        }
+        first = false;
+        url.push_str(k);
+        url.push('=');
+        url.push_str(v);
+    }
+    for (k, v) in replacements {
+        url.push('&');
+        url.push_str(&percent_encode(k));
+        url.push('=');
+        url.push_str(&percent_encode(v));
+    }
+    url
 }
 
 /// Find the active section/subsection title for a given 0-based page index.
@@ -139,6 +239,29 @@ fn is_leap_year(y: u32) -> bool {
 }
 
 #[cfg(test)]
+impl PageCtx {
+    /// Construct a fully-populated `PageCtx` suitable for use in tests.
+    pub fn sample() -> Self {
+        PageCtx {
+            page: 1,
+            topage: 5,
+            frompage: 1,
+            webpage: "http://example.com/".into(),
+            section: "Section".into(),
+            subsection: "Sub".into(),
+            subsubsection: "".into(),
+            date: "2026-06-28".into(),
+            isodate: "2026-06-28".into(),
+            time: "12:00:00".into(),
+            title: "Sample".into(),
+            doctitle: "Sample Doc".into(),
+            sitepage: 1,
+            sitepages: 5,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -147,11 +270,17 @@ mod tests {
             page: 2,
             topage: 5,
             frompage: 1,
+            webpage: "".into(),
             section: "Introduction".into(),
             subsection: "Overview".into(),
-            title: "My Doc".into(),
+            subsubsection: "".into(),
             date: "2026-06-28".into(),
+            isodate: "2026-06-28".into(),
             time: "12:00:00".into(),
+            title: "My Doc".into(),
+            doctitle: "My Doc".into(),
+            sitepage: 2,
+            sitepages: 5,
         }
     }
 
@@ -237,5 +366,45 @@ mod tests {
         // 2000-01-01 00:00:00 = 946684800
         let (y, mo, d, h, m, s) = epoch_to_datetime(946_684_800);
         assert_eq!((y, mo, d, h, m, s), (2000, 1, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn builds_query_string_with_all_tokens() {
+        let ctx = PageCtx {
+            page: 3,
+            frompage: 1,
+            topage: 10,
+            webpage: "http://x/".into(),
+            section: "S".into(),
+            subsection: "Sub".into(),
+            subsubsection: "".into(),
+            date: "2026-06-28".into(),
+            isodate: "2026-06-28".into(),
+            time: "12:00".into(),
+            title: "T".into(),
+            doctitle: "Doc".into(),
+            sitepage: 3,
+            sitepages: 10,
+        };
+        let url = header_footer_query("header.html", &ctx, &[]);
+        assert!(url.starts_with("header.html?"));
+        assert!(url.contains("page=3"));
+        assert!(url.contains("topage=10"));
+        assert!(url.contains("doctitle=Doc"));
+        assert!(url.contains("frompage=1"));
+    }
+
+    #[test]
+    fn url_encodes_values_and_appends_replacements() {
+        let ctx = PageCtx { title: "a&b c".into(), ..PageCtx::sample() };
+        let url = header_footer_query("h.html", &ctx, &[("co".into(), "A & B".into())]);
+        assert!(url.contains("title=a%26b%20c") || url.contains("title=a%26b+c"));
+        assert!(url.contains("co=A%20%26%20B") || url.contains("co=A+%26+B"));
+    }
+
+    #[test]
+    fn preserves_existing_query_in_base_url() {
+        let url = header_footer_query("h.html?x=1", &PageCtx::sample(), &[]);
+        assert!(url.contains("h.html?x=1&") && url.contains("page="));
     }
 }

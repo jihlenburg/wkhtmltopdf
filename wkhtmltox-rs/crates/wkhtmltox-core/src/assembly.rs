@@ -654,11 +654,17 @@ fn build_cell_strings(
             page: page_1based,
             topage: non_cover_pages,
             frompage: 1,
+            webpage: String::new(),
             section,
             subsection,
-            title: opts.doc_title.clone(),
+            subsubsection: String::new(),
             date: date.clone(),
+            isodate: date.clone(),
             time: time.clone(),
+            title: opts.doc_title.clone(),
+            doctitle: opts.doc_title.clone(),
+            sitepage: page_1based,
+            sitepages: non_cover_pages,
         };
 
         // Header row: top-left, top-center, top-right
