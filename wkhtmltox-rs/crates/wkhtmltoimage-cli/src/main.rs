@@ -420,7 +420,11 @@ fn run(args: &[String]) -> i32 {
     };
 
     // ── Post-process image ────────────────────────────────────────────────────
-    let image_bytes = match produce(&raw_image, &image_opts) {
+    // CDP already applied the crop via the clip parameter in SnapshotOpts;
+    // produce must not re-crop the already-cropped image.
+    let mut produce_opts = image_opts;
+    produce_opts.crop = None;
+    let image_bytes = match produce(&raw_image, &produce_opts) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("wkhtmltoimage: image pipeline failed: {e}");
@@ -637,8 +641,6 @@ mod tests {
 
     #[test]
     fn enable_local_file_access_flag() {
-        let mut s = ImageGlobalSettings::default();
-        s.allow_local_file_access = false;
         let parsed = parse(&args(&["--enable-local-file-access", "in.html", "out.png"])).unwrap();
         assert!(parsed.settings.allow_local_file_access);
     }

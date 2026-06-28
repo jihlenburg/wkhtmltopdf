@@ -788,6 +788,29 @@ pub unsafe extern "C" fn wkhtmltopdf_get_output(
     .unwrap_or(0)
 }
 
+// ---------------------------------------------------------------------------
+// Shared URL helper
+// ---------------------------------------------------------------------------
+
+/// Percent-encode a file-system path for use in a `file://` URL.
+///
+/// Keeps unreserved URI characters (RFC 3986 §2.3) plus `/`, `:`, `@`;
+/// encodes everything else as `%XX`.  Matches the identical helper in
+/// `wkhtmltoimage-cli` and `wkhtmltopdf-cli`.
+fn percent_encode_path(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    let mut out = String::with_capacity(s.len() + 16);
+    for &byte in s.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~'
+            | b'/' | b':' | b'@' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 // ===========================================================================
 // wkhtmltoimage exports
 // ===========================================================================
@@ -1183,14 +1206,14 @@ pub unsafe extern "C" fn wkhtmltoimage_convert(converter: *mut CImageConverter) 
                 } else if path.starts_with("http://") || path.starts_with("https://") || path.starts_with("file://") {
                     Source::Url(path.clone())
                 } else {
-                    // Treat as a local file path → file:// URL.
-                    let abs = std::path::Path::new(path);
-                    let file_url = if abs.is_absolute() {
-                        format!("file://{}", path)
+                    // Treat as a local file path → file:// URL (percent-encoded).
+                    let abs_path = std::path::Path::new(path);
+                    let file_url = if abs_path.is_absolute() {
+                        format!("file://{}", percent_encode_path(abs_path))
                     } else {
                         match std::env::current_dir() {
-                            Ok(cwd) => format!("file://{}", cwd.join(path).display()),
-                            Err(_) => format!("file://{}", path),
+                            Ok(cwd) => format!("file://{}", percent_encode_path(&cwd.join(path))),
+                            Err(_) => format!("file://{}", percent_encode_path(abs_path)),
                         }
                     };
                     Source::Url(file_url)
@@ -1278,7 +1301,11 @@ pub unsafe extern "C" fn wkhtmltoimage_convert(converter: *mut CImageConverter) 
 
         img_progress_emit(converter, 80);
 
-        let bytes = match image_produce(&raw, &img_opts) {
+        // CDP already applied the crop via the clip parameter in SnapshotOpts;
+        // produce must not re-crop the already-cropped image.
+        let mut produce_opts = img_opts;
+        produce_opts.crop = None;
+        let bytes = match image_produce(&raw, &produce_opts) {
             Ok(b) => b,
             Err(e) => {
                 img_error_emit(converter, &format!("image produce failed: {e}"));
