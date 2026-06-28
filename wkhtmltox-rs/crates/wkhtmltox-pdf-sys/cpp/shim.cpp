@@ -232,7 +232,7 @@ extern "C" int wkx_pdf_set_outline(const char* in_path, const char* out_path,
     } catch (const std::exception&) {
         return 1;
     } catch (...) {
-        return 2;
+        return 2; // unknown exception must not unwind across extern "C"
     }
 }
 
@@ -327,5 +327,16 @@ extern "C" int wkx_pdf_stamp_footer(const char* in_path, const char* out_path,
         return 1;
     } catch (...) {
         return 2;
+    }
+}
+
+// Return the number of pages in `in_path`, or -1 on error.
+extern "C" int wkx_pdf_page_count(const char* in_path) {
+    try {
+        QPDF q;
+        q.processFile(in_path);
+        return (int)QPDFPageDocumentHelper(q).getAllPages().size();
+    } catch (...) {
+        return -1;
     }
 }

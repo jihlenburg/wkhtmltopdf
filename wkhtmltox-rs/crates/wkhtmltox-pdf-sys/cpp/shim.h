@@ -12,6 +12,7 @@ int wkx_pdf_set_outline(const char* in_path, const char* out_path,
                         const int* levels, int n);
 int wkx_pdf_stamp_footer(const char* in_path, const char* out_path,
                          const char* fmt, int start);
+int wkx_pdf_page_count(const char* in_path);
 #ifdef __cplusplus
 }
 #endif

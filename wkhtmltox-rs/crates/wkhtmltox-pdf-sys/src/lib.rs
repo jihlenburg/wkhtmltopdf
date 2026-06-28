@@ -25,6 +25,7 @@ extern "C" {
         fmt: *const c_char,
         start: c_int,
     ) -> c_int;
+    fn wkx_pdf_page_count(in_path: *const c_char) -> c_int;
 }
 
 /// Safe wrapper: build a nested PDF `/Outlines` (bookmarks) tree on a copy of `in_path`
@@ -87,6 +88,17 @@ pub fn stamp_footer(
         Ok(())
     } else {
         Err(format!("wkx_pdf_stamp_footer rc={rc}"))
+    }
+}
+
+/// Safe wrapper: return the number of pages in the PDF at `p`.
+pub fn page_count(p: &Path) -> Result<u32, String> {
+    let cs = CString::new(p.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let rc = unsafe { wkx_pdf_page_count(cs.as_ptr()) };
+    if rc < 0 {
+        Err(format!("wkx_pdf_page_count rc={rc}"))
+    } else {
+        Ok(rc as u32)
     }
 }
 
