@@ -6,6 +6,7 @@ build = "build.rs"
 
 [build-dependencies]
 cc.workspace = true
+pkg-config.workspace = true
 
 [dev-dependencies]
 lopdf.workspace = true
