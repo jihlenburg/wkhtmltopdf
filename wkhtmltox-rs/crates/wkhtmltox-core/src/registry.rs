@@ -630,6 +630,7 @@ pub fn set_image_global(g: &mut ImageGlobalSettings, name: &str, value: &str) ->
         "web.enableJavascript" => g.enable_javascript = parse_bool(value)?,
         "web.printMediaType" => g.print_media_type = parse_bool(value)?,
         "web.background" => g.print_background = parse_bool(value)?,
+        "web.loadImages" => g.load_images = parse_bool(value)?,
 
         // ── load (canonical + loadPage.* aliases) ─────────────────────────
         "load.jsdelay" | "loadPage.jsdelay" => {
@@ -662,7 +663,6 @@ pub fn set_image_global(g: &mut ImageGlobalSettings, name: &str, value: &str) ->
         | "useGraphics"
         | "loadGlobal.cookieJar"
         | "load.cookieJar"
-        | "web.loadImages"
         | "web.enableIntelligentShrinking"
         | "web.minimumFontSize"
         | "web.defaultEncoding"
@@ -724,6 +724,7 @@ pub fn get_image_global(g: &ImageGlobalSettings, name: &str) -> Option<String> {
         "web.enableJavascript" => g.enable_javascript.to_string(),
         "web.printMediaType"   => g.print_media_type.to_string(),
         "web.background"       => g.print_background.to_string(),
+        "web.loadImages"       => g.load_images.to_string(),
 
         // ── load ──────────────────────────────────────────────────────────
         "load.jsdelay" | "loadPage.jsdelay" => g.javascript_delay_ms.to_string(),
@@ -747,7 +748,6 @@ pub fn get_image_global(g: &ImageGlobalSettings, name: &str) -> Option<String> {
         | "useGraphics"
         | "loadGlobal.cookieJar"
         | "load.cookieJar"
-        | "web.loadImages"
         | "web.enableIntelligentShrinking"
         | "web.minimumFontSize"
         | "web.defaultEncoding"

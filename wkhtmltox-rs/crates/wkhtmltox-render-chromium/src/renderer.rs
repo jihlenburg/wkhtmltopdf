@@ -73,6 +73,9 @@ struct ActiveFetchState {
     /// Extra HTTP headers (custom + Basic-auth) to inject on `continueRequest`
     /// ONLY when the request's origin matches `nav_url`'s origin (I3).
     extra_headers: Vec<(String, String)>,
+    /// When `false`, all Image-type resources are blocked before policy
+    /// evaluation (fail-safe: never promotes a policy Block to an Allow).
+    load_images: bool,
 }
 
 pub struct ChromiumRenderer {
@@ -95,6 +98,9 @@ pub struct ChromiumRenderer {
     blocked_urls: Vec<String>,
     /// Active Fetch interception state.  `None` when Fetch is disabled.
     fetch_state: Option<ActiveFetchState>,
+    /// Device metrics stored at `open()` time so `wait_ready()` can apply
+    /// smart-width expansion after the page has loaded.
+    device_metrics: Option<wkhtmltox_core::render::DeviceMetrics>,
 }
 
 impl ChromiumRenderer {
@@ -250,6 +256,9 @@ fn build_continue_params(
 /// * C1b: The top-level document request (identified by `resourceType ==
 ///   "Document"` AND `url == nav_url`) is always allowed, so that
 ///   `--safe <file.html>` and `--safe --toc`/`--cover` work.
+/// * Image block: When `!load_images` and `resourceType == "Image"`, the
+///   request is failed BEFORE policy evaluation (fail-safe: never promotes a
+///   policy Block to an Allow).
 /// * Policy: All other requests (subresources, sub-frame documents) are
 ///   evaluated via `fetch_action`.
 /// * I3: Allowed same-origin requests receive `extra_headers` via
@@ -261,6 +270,7 @@ fn handle_fetch_event(
     policy: &ResourcePolicy,
     nav_url: &str,
     extra_headers: &[(String, String)],
+    load_images: bool,
     blocked: &mut Vec<String>,
 ) -> Result<Vec<(String, serde_json::Value)>> {
     let params = &msg["params"];
@@ -275,6 +285,15 @@ fn handle_fetch_event(
             &request_id, &req_url, original_headers, nav_url, extra_headers,
         );
         return Ok(vec![("Fetch.continueRequest".into(), cp)]);
+    }
+
+    // Image block: checked BEFORE policy so it can only ADD blocks, never remove them.
+    if !load_images && resource_type == "Image" {
+        blocked.push(req_url);
+        return Ok(vec![("Fetch.failRequest".into(), json!({
+            "requestId": request_id,
+            "errorReason": "BlockedByClient",
+        }))]);
     }
 
     let is_redirect = params
@@ -405,6 +424,7 @@ impl ChromiumRenderer {
             _html_temp: None,
             blocked_urls: Vec::new(),
             fetch_state: None,
+            device_metrics: None,
         })
     }
 
@@ -433,11 +453,12 @@ impl ChromiumRenderer {
         let nav_url = self.fetch_state.as_ref().unwrap().nav_url.clone();
         let policy = self.fetch_state.as_ref().unwrap().policy.clone();
         let extra_headers = self.fetch_state.as_ref().unwrap().extra_headers.clone();
+        let load_images = self.fetch_state.as_ref().unwrap().load_images;
 
         let mut new_blocked: Vec<String> = Vec::new();
 
         let result = self.cdp.call_pumping(method, params, |msg| {
-            handle_fetch_event(msg, &policy, &nav_url, &extra_headers, &mut new_blocked)
+            handle_fetch_event(msg, &policy, &nav_url, &extra_headers, load_images, &mut new_blocked)
         })?;
 
         self.blocked_urls.extend(new_blocked);
@@ -505,6 +526,8 @@ impl Renderer for ChromiumRenderer {
 
         // Persist compat CSS so wait_ready() can inject it after the page loads.
         self.compat_ua_css = load.compat_ua_css.clone();
+        // Persist device_metrics so wait_ready() can apply smart-width expansion.
+        self.device_metrics = load.device_metrics.clone();
 
         // ── Build per-origin extra headers (I3) ───────────────────────────────
         //
@@ -544,6 +567,20 @@ impl Renderer for ChromiumRenderer {
 
         if !load.enable_javascript {
             self.cdp.call("Emulation.setScriptExecutionDisabled", json!({ "value": true }))?;
+        }
+
+        // ── Viewport / device-scale override (Emulation.setDeviceMetricsOverride) ─
+        //
+        // Applied BEFORE Page.navigate so that Chrome lays out the page at the
+        // requested viewport width from the very first paint.
+        if let Some(dm) = &load.device_metrics {
+            let w = if dm.width > 0 { dm.width } else { 1024 }; // upstream screenWidth default
+            let h = if dm.height > 0 { dm.height } else { 0 };
+            self.cdp.call("Emulation.setDeviceMetricsOverride", json!({
+                "width": w, "height": h,
+                "deviceScaleFactor": if dm.device_scale_factor > 0.0 { dm.device_scale_factor } else { 1.0 },
+                "mobile": false
+            }))?;
         }
 
         // ── Enable Fetch interception (whole-load, C1) ────────────────────────
@@ -625,6 +662,16 @@ impl Renderer for ChromiumRenderer {
                             &url, &extra_headers,
                         );
                         self.cdp.send_only("Fetch.continueRequest", cp)?;
+                    } else if !load.load_images && resource_type == "Image" {
+                        // Image block: checked BEFORE policy (fail-safe).
+                        self.blocked_urls.push(req_url);
+                        self.cdp.send_only(
+                            "Fetch.failRequest",
+                            json!({
+                                "requestId": request_id,
+                                "errorReason": "BlockedByClient",
+                            }),
+                        )?;
                     } else {
                         match fetch_action(&load.policy, &req_url, is_redirect) {
                             FetchDecision::Continue => {
@@ -660,6 +707,7 @@ impl Renderer for ChromiumRenderer {
             nav_url: url,
             policy: load.policy.clone(),
             extra_headers,
+            load_images: load.load_images,
         });
 
         Ok(PageHandle(1))
@@ -730,6 +778,35 @@ impl Renderer for ChromiumRenderer {
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
+
+        // ── smart_width expansion ─────────────────────────────────────────────
+        //
+        // Best-effort: if smart_width is enabled and a width was set, measure
+        // the page's scroll width and re-issue setDeviceMetricsOverride with the
+        // larger of the two values so content is not clipped.  Approximate only.
+        if let Some(dm) = &self.device_metrics.clone() {
+            if dm.smart_width && dm.width > 0 {
+                let configured_w = dm.width;
+                let scroll_val = self.call_pumping(
+                    "Runtime.evaluate",
+                    json!({ "expression": "document.documentElement.scrollWidth", "returnByValue": true }),
+                )?;
+                if let Some(scroll_w) = scroll_val["result"]["value"].as_u64() {
+                    let scroll_w = scroll_w as u32;
+                    if scroll_w > configured_w {
+                        let h = if dm.height > 0 { dm.height } else { 0 };
+                        let dsf = if dm.device_scale_factor > 0.0 { dm.device_scale_factor } else { 1.0 };
+                        // Best-effort: ignore errors (viewport expansion is non-critical).
+                        let _ = self.call_pumping("Emulation.setDeviceMetricsOverride", json!({
+                            "width": scroll_w, "height": h,
+                            "deviceScaleFactor": dsf,
+                            "mobile": false
+                        }));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 

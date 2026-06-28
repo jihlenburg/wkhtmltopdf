@@ -427,6 +427,8 @@ impl GlobalSettings {
             allow_local_file_access: self.allow_local_file_access,
             compat_ua_css: None,
             policy,
+            device_metrics: None,
+            load_images: true,
         }
     }
 }
@@ -545,6 +547,9 @@ pub struct ImageGlobalSettings {
     pub enable_javascript: bool,    // "web.enableJavascript"
     pub print_media_type: bool,     // "web.printMediaType"
     pub print_background: bool,     // "web.background"
+    /// When `false`, all image resources are blocked (`"web.loadImages"` /
+    /// `--no-images`).  Default `true` (permissive).
+    pub load_images: bool,          // "web.loadImages"
 
     // --- Load settings ---------------------------------------------------
     /// JavaScript delay in milliseconds (`"load.jsdelay"`).
@@ -598,6 +603,7 @@ impl Default for ImageGlobalSettings {
             enable_javascript: true,
             print_media_type: false,
             print_background: true,
+            load_images: true,
             javascript_delay_ms: 200,
             proxy: None,
             no_check_certificate: false,
@@ -648,6 +654,7 @@ impl ImageGlobalSettings {
     /// security-policy fields.
     pub fn to_load_settings(&self) -> crate::render::LoadSettings {
         use crate::policy::ResourcePolicy;
+        use crate::render::DeviceMetrics;
         let policy = if self.safe_mode {
             ResourcePolicy {
                 allowed_paths: self.allowed_paths.clone(),
@@ -665,6 +672,21 @@ impl ImageGlobalSettings {
             }
         };
 
+        // Populate device_metrics when any viewport/zoom setting is non-trivial.
+        let device_metrics = if self.zoom != 1.0
+            || self.screen_width.is_some()
+            || self.screen_height.is_some()
+        {
+            Some(DeviceMetrics {
+                width: self.screen_width.unwrap_or(0),
+                height: self.screen_height.unwrap_or(0),
+                device_scale_factor: if self.zoom > 0.0 { self.zoom } else { 1.0 },
+                smart_width: self.smart_width,
+            })
+        } else {
+            None
+        };
+
         crate::render::LoadSettings {
             cookies: self.cookies.clone(),
             custom_headers: self.custom_headers.clone(),
@@ -676,6 +698,8 @@ impl ImageGlobalSettings {
             allow_local_file_access: self.allow_local_file_access,
             compat_ua_css: None,
             policy,
+            device_metrics,
+            load_images: self.load_images,
         }
     }
 }
@@ -899,5 +923,18 @@ mod tests {
         assert!(opts.header.is_none());
         assert!(opts.footer.is_none());
         assert!((opts.header_footer_font_size - 9.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn image_settings_forward_zoom_and_screen_width_to_device_metrics() {
+        let mut g = ImageGlobalSettings::default();
+        g.zoom = 2.0;
+        g.screen_width = Some(800);
+        g.smart_width = false;
+        let ls = g.to_load_settings();
+        let dm = ls.device_metrics.expect("device_metrics set when zoom/width given");
+        assert_eq!(dm.width, 800);
+        assert!((dm.device_scale_factor - 2.0).abs() < 1e-9);
+        assert!(!dm.smart_width);
     }
 }

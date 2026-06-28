@@ -13,7 +13,16 @@ pub enum Source {
     Stdin,
 }
 
-#[derive(Debug, Clone, Default)]
+/// Viewport/scale overrides applied via CDP `Emulation.setDeviceMetricsOverride`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceMetrics {
+    pub width: u32,               // 0 = let Chrome choose
+    pub height: u32,              // 0 = let Chrome choose
+    pub device_scale_factor: f64, // 1.0 = no zoom
+    pub smart_width: bool,        // expand width to content after load
+}
+
+#[derive(Debug, Clone)]
 pub struct LoadSettings {
     pub cookies: Vec<(String, String)>,
     pub custom_headers: Vec<(String, String)>,
@@ -35,6 +44,31 @@ pub struct LoadSettings {
     /// is permissive (matching historic wkhtmltopdf behaviour).  Use
     /// [`ResourcePolicy::safe_profile()`] or `--safe` to harden.
     pub policy: ResourcePolicy,
+    /// Viewport/scale overrides forwarded to CDP `Emulation.setDeviceMetricsOverride`.
+    /// `None` = let Chrome use its default viewport.
+    pub device_metrics: Option<DeviceMetrics>,
+    /// When `false`, all Image-type resources are blocked via the Fetch pump.
+    /// Default `true` (permissive, matching historic wkhtmltopdf behaviour).
+    pub load_images: bool,
+}
+
+impl Default for LoadSettings {
+    fn default() -> Self {
+        Self {
+            cookies: Vec::new(),
+            custom_headers: Vec::new(),
+            username: None,
+            password: None,
+            proxy: None,
+            no_check_certificate: false,
+            enable_javascript: false,
+            allow_local_file_access: false,
+            compat_ua_css: None,
+            policy: ResourcePolicy::default(),
+            device_metrics: None,
+            load_images: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

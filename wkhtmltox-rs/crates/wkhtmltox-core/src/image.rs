@@ -55,6 +55,21 @@ impl Default for ImageOpts {
     }
 }
 
+/// Composite an RGBA image over a solid-white background, returning an RGB image.
+///
+/// Used by both the PNG non-transparent path and the JPEG path so that
+/// transparency always flattens to white rather than black.
+fn composite_over_white(rgba: &img::RgbaImage) -> img::RgbImage {
+    let (w, h) = rgba.dimensions();
+    let mut flat = img::RgbImage::new(w, h);
+    for (x, y, pix) in rgba.enumerate_pixels() {
+        let a = pix[3] as f32 / 255.0;
+        let blend = |c: u8| (c as f32 * a + 255.0 * (1.0 - a)).round() as u8;
+        flat.put_pixel(x, y, img::Rgb([blend(pix[0]), blend(pix[1]), blend(pix[2])]));
+    }
+    flat
+}
+
 /// Process a raw CDP screenshot into the final output image.
 ///
 /// Pipeline steps (in order):
@@ -99,17 +114,7 @@ pub fn produce(raw: &RawImage, opts: &ImageOpts) -> Result<Vec<u8>> {
         ImageFormat::Png => {
             let to_encode = if !opts.transparent {
                 // Composite alpha onto solid white.
-                let rgba = dynimg.to_rgba8();
-                let (w, h) = rgba.dimensions();
-                let mut flat = img::RgbImage::new(w, h);
-                for (x, y, pix) in rgba.enumerate_pixels() {
-                    let a = pix[3] as f32 / 255.0;
-                    let r = (pix[0] as f32 * a + 255.0 * (1.0 - a)) as u8;
-                    let g = (pix[1] as f32 * a + 255.0 * (1.0 - a)) as u8;
-                    let b = (pix[2] as f32 * a + 255.0 * (1.0 - a)) as u8;
-                    flat.put_pixel(x, y, img::Rgb([r, g, b]));
-                }
-                img::DynamicImage::ImageRgb8(flat)
+                img::DynamicImage::ImageRgb8(composite_over_white(&dynimg.to_rgba8()))
             } else {
                 dynimg
             };
@@ -118,8 +123,9 @@ pub fn produce(raw: &RawImage, opts: &ImageOpts) -> Result<Vec<u8>> {
                 .map_err(|e| WkError::Render(format!("png encode: {e}")))?;
         }
         ImageFormat::Jpeg => {
-            // JPEG has no alpha channel — convert to RGB first.
-            let rgb = img::DynamicImage::ImageRgb8(dynimg.to_rgb8());
+            // JPEG has no alpha channel; composite over white (matches the PNG
+            // non-transparent path) so transparency flattens to white, never black.
+            let rgb = img::DynamicImage::ImageRgb8(composite_over_white(&dynimg.to_rgba8()));
             let encoder = img::codecs::jpeg::JpegEncoder::new_with_quality(
                 &mut buf,
                 opts.quality,
@@ -264,5 +270,24 @@ mod tests {
         let img = img::load_from_memory(&bytes).expect("decode tiny_png");
         assert_eq!(img.width(), 2);
         assert_eq!(img.height(), 2);
+    }
+
+    #[test]
+    fn jpeg_flattens_alpha_over_white_not_black() {
+        // A fully transparent RGBA pixel must encode as white (255), not black,
+        // on the JPEG path (JPEG has no alpha; raw to_rgb8 would drop to 0,0,0).
+        let mut rgba = img::RgbaImage::new(2, 2);
+        for px in rgba.pixels_mut() { *px = img::Rgba([0, 0, 0, 0]); } // transparent black
+        let mut png_buf = Cursor::new(Vec::new());
+        img::DynamicImage::ImageRgba8(rgba)
+            .write_to(&mut png_buf, img::ImageFormat::Png)
+            .unwrap();
+        let raw = RawImage { bytes: png_buf.into_inner(), format: ImageFormat::Png };
+        let opts = ImageOpts { format: ImageFormat::Jpeg, transparent: false, quality: 90,
+                               width: None, height: None, crop: None, zoom: 1.0, screen_width: None };
+        let out = produce(&raw, &opts).unwrap();
+        let decoded = img::load_from_memory(&out).unwrap().to_rgb8();
+        let p = decoded.get_pixel(0, 0);
+        assert!(p[0] > 240 && p[1] > 240 && p[2] > 240, "transparent→white, got {p:?}");
     }
 }
