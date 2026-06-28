@@ -45,7 +45,7 @@ fn main() {
         ..Default::default()
     };
 
-    let report = assemble_pdf(&mut renderer, &objects, &geom, &out, true).unwrap_or_else(|e| {
+    let report = assemble_pdf(&mut renderer, &objects, &geom, &out, true, false).unwrap_or_else(|e| {
         eprintln!("assemble_pdf failed: {e}");
         std::process::exit(1);
     });

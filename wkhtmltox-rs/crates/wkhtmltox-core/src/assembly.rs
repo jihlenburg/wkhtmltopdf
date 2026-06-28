@@ -1,5 +1,5 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Result, WkError};
 use crate::outline;
@@ -15,6 +15,11 @@ pub struct AssemblyReport {
 /// attach a combined `/Outlines` bookmark tree derived from the per-object heading
 /// probes, and — when `number` is `true` — stamp page-number footers.
 ///
+/// When `with_toc` is `true` a Table of Contents page is prepended.  The TOC
+/// is rendered as a leading object and its page count is stabilised via a
+/// fixed-point loop (cap 3 iterations) so that the page numbers printed in the
+/// TOC match the final document layout.
+///
 /// # Per-heading page accuracy
 /// For each part PDF that contains an `/Outlines` tree (emitted by Chromium via
 /// `generateDocumentOutline:true`), [`crate::pdfread::extract_outline`] is used to
@@ -27,6 +32,7 @@ pub fn assemble_pdf(
     geom: &PageGeometry,
     out: &Path,
     number: bool,
+    with_toc: bool,
 ) -> Result<AssemblyReport> {
     // Fix 2: reject empty input early.
     if objects.is_empty() {
@@ -37,6 +43,13 @@ pub fn assemble_pdf(
     // TempDir auto-removes on drop — cleanup is now unconditional (leak-on-error fixed).
     let work = tempfile::TempDir::new().map_err(|e| WkError::Io(e.to_string()))?;
 
+    // ── TOC path ──────────────────────────────────────────────────────────────
+    if with_toc {
+        return assemble_with_toc(r, objects, geom, out, number, work.path());
+        // `work` drops here after assemble_with_toc returns.
+    }
+
+    // ── Non-TOC path (unchanged) ──────────────────────────────────────────────
     let mut outline_items: Vec<(String, u32, u8)> = Vec::new();
     let mut offset: u32 = 0;
     let mut parts: Vec<std::path::PathBuf> = Vec::with_capacity(objects.len());
@@ -101,6 +114,162 @@ pub fn assemble_pdf(
     // `work` drops here → TempDir removes the directory unconditionally.
     Ok(AssemblyReport {
         pages: offset,
+        objects: objects.len(),
+    })
+}
+
+/// Inner implementation of the TOC + fixed-point loop path.
+///
+/// Called only when `with_toc = true`; separated so the `TempDir` borrow in
+/// the caller stays in scope across the copy.
+fn assemble_with_toc(
+    r: &mut dyn Renderer,
+    objects: &[Source],
+    geom: &PageGeometry,
+    out: &Path,
+    number: bool,
+    work: &Path,
+) -> Result<AssemblyReport> {
+    // ── Phase 1: render all content objects ───────────────────────────────────
+    struct ContentPart {
+        path: PathBuf,
+        page_count: u32,
+        /// Flat outline entries extracted from this object's PDF.
+        /// Each entry is `(title, local_page_0based, level)`.
+        local_outline: Vec<(String, u32, u8)>,
+    }
+
+    let mut content_parts: Vec<ContentPart> = Vec::with_capacity(objects.len());
+
+    for (i, src) in objects.iter().enumerate() {
+        let ph = r.open(src, &LoadSettings::default())?;
+        r.wait_ready(ph, &ReadyPolicy::default())?;
+        let probe = r.eval_json(ph, outline::PROBE_JS)?;
+        let bytes = r.print_pdf(ph, geom)?;
+
+        let part = work.join(format!("part{i}.pdf"));
+        std::fs::write(&part, &bytes).map_err(|e| WkError::Io(e.to_string()))?;
+
+        let page_count = wkhtmltox_pdf_sys::page_count(&part).map_err(WkError::Pdf)?;
+
+        // Prefer engine-embedded /Outlines (exact pages); fall back to JS probe.
+        let engine = crate::pdfread::extract_outline(&part);
+        let local_outline: Vec<(String, u32, u8)> = if !engine.is_empty() {
+            engine
+        } else {
+            outline::parse_probe(&probe)
+                .into_iter()
+                .map(|h| (h.text, h.page, h.level))
+                .collect()
+        };
+
+        content_parts.push(ContentPart { path: part, page_count, local_outline });
+    }
+
+    // ── Phase 2: fixed-point TOC page-count stabilisation ─────────────────────
+    //
+    // Inserting a TOC shifts content page numbers, which changes the TOC
+    // content, which may change the TOC page count.  We iterate until the TOC
+    // page count stabilises (or cap at MAX_ITERS and log a warning).
+    //
+    // cover_pages = 0 here; Task 4 will wire the cover offset.
+
+    let cover_pages: u32 = 0;
+    let mut toc_pages: u32 = 1; // initial estimate: assume 1 TOC page
+    const MAX_ITERS: u32 = 3;
+
+    let mut final_toc_path = work.join("toc0.pdf");
+    let mut outline_items: Vec<(String, u32, u8)> = Vec::new();
+    let mut converged = false;
+
+    for _iter in 0..MAX_ITERS {
+        // Recompute global (0-based) page offsets for every heading, assuming
+        // the TOC occupies `toc_pages` pages.
+        outline_items.clear();
+        let mut prior: u32 = 0;
+        for cp in &content_parts {
+            for (title, local_0, level) in &cp.local_outline {
+                let global_0 = cover_pages + toc_pages + prior + local_0;
+                outline_items.push((title.clone(), global_0, *level));
+            }
+            prior += cp.page_count;
+        }
+
+        // Build TOC HTML with 1-based display page numbers.
+        let toc_display: Vec<(String, u32, u8)> = outline_items
+            .iter()
+            .map(|(t, g, l)| (t.clone(), g + 1, *l))
+            .collect();
+        let toc_html = crate::toc::render_toc_html(&toc_display);
+
+        // TODO(M3/M4): ChromiumRenderer must accept Source::Html for TOC.
+        // Until then, TOC rendering is exercised via MockRenderer in tests; the
+        // real-Chrome path (T6) writes the HTML to a temp file and uses file://.
+        let tp = r.open(&Source::Html(toc_html), &LoadSettings::default())?;
+        r.wait_ready(tp, &ReadyPolicy::default())?;
+        let toc_bytes = r.print_pdf(tp, geom)?;
+        let tpath = work.join(format!("toc{_iter}.pdf"));
+        std::fs::write(&tpath, &toc_bytes).map_err(|e| WkError::Io(e.to_string()))?;
+        let new_pages = wkhtmltox_pdf_sys::page_count(&tpath).map_err(WkError::Pdf)?;
+
+        final_toc_path = tpath;
+
+        if new_pages == toc_pages {
+            converged = true;
+            break; // page count stable — outline_items are consistent with TOC
+        }
+        toc_pages = new_pages;
+    }
+
+    if !converged {
+        eprintln!(
+            "wkhtmltox: TOC page count did not converge in {} iterations; \
+             using last result (page numbers may be off by ≤1 page)",
+            MAX_ITERS
+        );
+    }
+
+    // ── Phase 3: assemble [toc, content…] and set outline ─────────────────────
+
+    // Prepend a top-level "Table of Contents" bookmark pointing at the TOC itself.
+    let mut all_outline: Vec<(String, u32, u8)> = Vec::with_capacity(1 + outline_items.len());
+    all_outline.push(("Table of Contents".to_string(), cover_pages, 1u8));
+    all_outline.extend_from_slice(&outline_items);
+
+    let mut parts: Vec<PathBuf> = Vec::with_capacity(1 + content_parts.len());
+    parts.push(final_toc_path);
+    for cp in &content_parts {
+        parts.push(cp.path.clone());
+    }
+
+    let content_pages: u32 = content_parts.iter().map(|cp| cp.page_count).sum();
+    let total_pages = toc_pages + content_pages;
+
+    let merged = work.join("merged.pdf");
+    wkhtmltox_pdf_sys::merge(&parts, &merged).map_err(WkError::Pdf)?;
+
+    let after_outline = if !all_outline.is_empty() {
+        let outlined = work.join("outlined.pdf");
+        wkhtmltox_pdf_sys::set_outline(&merged, &outlined, &all_outline)
+            .map_err(WkError::Pdf)?;
+        outlined
+    } else {
+        merged
+    };
+
+    let final_path = if number {
+        let numbered = work.join("numbered.pdf");
+        wkhtmltox_pdf_sys::stamp_footer(&after_outline, &numbered, "[page] / [topage]", 1)
+            .map_err(WkError::Pdf)?;
+        numbered
+    } else {
+        after_outline
+    };
+
+    std::fs::copy(&final_path, out).map_err(|e| WkError::Io(e.to_string()))?;
+
+    Ok(AssemblyReport {
+        pages: total_pages,
         objects: objects.len(),
     })
 }

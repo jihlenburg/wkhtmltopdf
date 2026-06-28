@@ -7,4 +7,5 @@ pub mod outline;
 pub mod pdfread;
 pub mod render;
 pub mod testing;
+pub mod toc;
 pub use error::{Result, WkError};

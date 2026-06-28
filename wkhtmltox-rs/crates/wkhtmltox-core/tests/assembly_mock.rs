@@ -141,7 +141,8 @@ fn assemble_two_objects_two_pages_each() {
         &[Source::Html("a".into()), Source::Html("b".into())],
         &PageGeometry::default(),
         &out,
-        true, // stamp page numbers
+        true,  // stamp page numbers
+        false, // no TOC
     )
     .expect("assemble_pdf should succeed");
 
@@ -279,6 +280,7 @@ fn exact_page_from_engine_outline() {
         &PageGeometry::default(),
         &out,
         false, // no footer stamp — keep pipeline minimal
+        false, // no TOC
     )
     .expect("assemble_pdf should succeed");
 
