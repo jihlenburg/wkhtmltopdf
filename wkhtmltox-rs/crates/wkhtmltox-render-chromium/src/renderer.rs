@@ -1,4 +1,5 @@
 // wkhtmltox-rs — Copyright 2026 wkhtmltopdf authors. LGPL-3.0-or-later.
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -43,6 +44,15 @@ pub struct ChromiumRenderer {
     cdp: Cdp,
     /// Compat CSS stored at `open()` time from `LoadSettings::compat_ua_css`.
     compat_ua_css: Option<String>,
+    /// Keeps the temp HTML file alive for the duration of the current page.
+    ///
+    /// When [`Source::Html`] is passed to [`open`], the HTML is written to a
+    /// `NamedTempFile` so Chrome can load it via a `file://` URL.  The file
+    /// must not be deleted until Chrome has finished reading it (i.e. after
+    /// [`print_pdf`] returns), so we hold the guard here.  It is replaced on
+    /// every subsequent call to `open()` and cleared when a [`Source::Url`]
+    /// is opened.
+    _html_temp: Option<tempfile::NamedTempFile>,
 }
 
 fn mm_to_in(mm: f64) -> f64 { mm / 25.4 }
@@ -103,7 +113,7 @@ impl ChromiumRenderer {
 
         // All succeeded — disarm the guard and hand ownership to ChromiumRenderer.
         let (child, user_data_dir) = guard.disarm();
-        Ok(Self { child, user_data_dir, cdp, compat_ua_css: None })
+        Ok(Self { child, user_data_dir, cdp, compat_ua_css: None, _html_temp: None })
     }
 }
 
@@ -118,9 +128,35 @@ impl Drop for ChromiumRenderer {
 impl Renderer for ChromiumRenderer {
     fn open(&mut self, src: &Source, load: &LoadSettings) -> Result<PageHandle> {
         let url = match src {
-            Source::Url(u) => u.clone(),
-            Source::Html(_) | Source::Stdin =>
-                return Err(WkError::Engine("Html/Stdin sources land in a later milestone".into())),
+            Source::Url(u) => {
+                // Release any previously held HTML temp file — it is no longer
+                // needed now that we are navigating to a URL.
+                self._html_temp = None;
+                u.clone()
+            }
+            Source::Html(html) => {
+                // Write the HTML to a NamedTempFile with a `.html` extension so
+                // that Chrome applies the correct MIME type when loading it via
+                // the `file://` scheme.  The file guard is stored in `_html_temp`
+                // and lives until the next call to `open()` (or until the
+                // renderer is dropped), ensuring Chrome can finish reading it.
+                let mut tmp = tempfile::Builder::new()
+                    .prefix("wkx-html-")
+                    .suffix(".html")
+                    .tempfile()
+                    .map_err(|e| WkError::Io(format!("create html temp file: {e}")))?;
+                tmp.write_all(html.as_bytes())
+                    .map_err(|e| WkError::Io(format!("write html temp file: {e}")))?;
+                tmp.flush()
+                    .map_err(|e| WkError::Io(format!("flush html temp file: {e}")))?;
+                let path = tmp.path().to_path_buf();
+                let file_url = format!("file://{}", path.display());
+                // Keep the guard alive so the file is not deleted before Chrome loads it.
+                self._html_temp = Some(tmp);
+                file_url
+            }
+            Source::Stdin =>
+                return Err(WkError::Engine("Stdin source not supported by ChromiumRenderer".into())),
         };
         // Persist compat CSS so wait_ready() can inject it after the page loads.
         self.compat_ua_css = load.compat_ua_css.clone();

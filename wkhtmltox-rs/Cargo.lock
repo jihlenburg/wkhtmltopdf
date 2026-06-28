@@ -1573,6 +1573,7 @@ dependencies = [
  "base64",
  "lopdf",
  "serde_json",
+ "tempfile",
  "tungstenite",
  "ureq",
  "wkhtmltox-core",

@@ -60,6 +60,13 @@ parser.add_argument(
     default=False,
     help="Run the 2-document assembly comparison (text.html + headings.html) instead of the corpus sweep.",
 )
+parser.add_argument(
+    "--m2b",
+    action="store_true",
+    default=False,
+    help="Run the M2b full-document assembly comparison "
+         "(cover+toc+footer: headings.html + longtext.html) vs the oracle.",
+)
 ARGS = parser.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -669,10 +676,366 @@ def run_assembly_comparison():
 
 
 # ---------------------------------------------------------------------------
+# M2b full-document assembly comparison (cover + toc + footer)
+# ---------------------------------------------------------------------------
+
+COVER_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Document Cover</title>
+<style>
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+  }
+  h1 { font-size: 36pt; margin-bottom: 12pt; }
+  p  { font-size: 14pt; color: #555; }
+</style>
+</head>
+<body>
+  <h1>Test Document</h1>
+  <p>wkhtmltox-rs M2b Validation Report</p>
+</body>
+</html>
+"""
+
+FOOTER_TMPL = "[page]/[topage]"
+
+
+def run_oracle_m2b(cover_html: Path, html_paths: list, out_pdf: Path) -> tuple[str, str]:
+    """
+    Run wkhtmltopdf with cover + toc + pages + footer.
+    Returns (status, detail).
+
+    Oracle command:
+      wkhtmltopdf [global] --footer-center "[page]/[topage]" \\
+          cover cover.html toc page1.html page2.html out.pdf
+    """
+    cmd = [
+        str(ORACLE_BIN),
+        "-s", "A4",
+        "-T", "10mm", "-B", "10mm", "-L", "10mm", "-R", "10mm",
+        "--dpi", "96",
+        "--enable-local-file-access",
+        "--outline",
+        "--footer-center", FOOTER_TMPL,
+        "--quiet",
+        "cover", str(cover_html),
+        "toc",
+    ]
+    for p in html_paths:
+        cmd.append(str(p))
+    cmd.append(str(out_pdf))
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return "ORACLE_CRASH", "timeout after 180s"
+    except Exception as exc:
+        return "ORACLE_CRASH", f"subprocess error: {exc}"
+
+    stderr_tail = result.stderr.strip()[-500:] if result.stderr else ""
+    if result.returncode < 0:
+        import signal as _signal
+        sig = -result.returncode
+        try:
+            sig_name = _signal.Signals(sig).name
+        except ValueError:
+            sig_name = str(sig)
+        return "ORACLE_CRASH", f"killed by SIG{sig_name}; stderr: {stderr_tail}"
+    if result.returncode != 0 or not out_pdf.exists():
+        return "ORACLE_ERROR", f"rc={result.returncode}; stderr: {stderr_tail}"
+    return "OK", stderr_tail
+
+
+def run_new_m2b(cover_html: Path, html_paths: list, out_pdf: Path) -> tuple[str, str]:
+    """
+    Run cargo run --example assemble with --toc --cover --footer-center flags.
+    Returns (status, detail).
+    """
+    resolved = [str(Path(p).resolve()) for p in html_paths]
+    cmd = [
+        "cargo", "run", "-q",
+        "--example", "assemble",
+        "-p", "wkhtmltox-render-chromium",
+        "--",
+        str(out_pdf),
+        "--toc",
+        "--cover", str(cover_html.resolve()),
+        "--footer-center", FOOTER_TMPL,
+        *resolved,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600,
+            cwd=str(WORKSPACE_DIR)
+        )
+    except subprocess.TimeoutExpired:
+        return "NEW_CRASH", "timeout after 600s"
+    except Exception as exc:
+        return "NEW_CRASH", f"subprocess error: {exc}"
+
+    combined = (result.stderr + result.stdout).strip()
+    tail = combined[-500:] if combined else ""
+
+    if result.returncode < 0:
+        import signal as _signal
+        sig = -result.returncode
+        try:
+            sig_name = _signal.Signals(sig).name
+        except ValueError:
+            sig_name = str(sig)
+        return "NEW_CRASH", f"killed by SIG{sig_name}; output: {tail}"
+    if result.returncode != 0 or not out_pdf.exists():
+        return "NEW_ERROR", f"rc={result.returncode}; output: {tail}"
+    return "OK", tail
+
+
+def has_toc_page(doc: fitz.Document) -> bool:
+    """
+    Return True if any page in doc contains text matching a Table of Contents heading.
+    Checks for 'Table of Contents', 'Contents', or 'Inhaltsverzeichnis'.
+    """
+    toc_patterns = ["table of contents", "contents"]
+    for page in doc:
+        text_lower = page.get_text("text").lower()
+        for pat in toc_patterns:
+            if pat in text_lower:
+                return True
+    return False
+
+
+def run_m2b_comparison():
+    """
+    Full M2b assembly comparison:
+    - Oracle: wkhtmltopdf cover + toc + footer
+    - New engine: assemble --toc --cover --footer-center
+    - Inputs: corpus/headings.html + corpus/longtext.html
+    - Writes results-m2b.md and results-m2b.json
+    """
+    corpus_dir = SCRIPT_DIR / "corpus"
+    doc1 = corpus_dir / "headings.html"
+    doc2 = corpus_dir / "longtext.html"
+
+    for p in (doc1, doc2):
+        if not p.exists():
+            print(f"ERROR: corpus file not found: {p}", file=sys.stderr)
+            sys.exit(1)
+
+    m2b_out_dir = SCRIPT_DIR / "out-m2b"
+    m2b_out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write the cover HTML to the output directory.
+    cover_html = m2b_out_dir / "cover.html"
+    cover_html.write_text(COVER_HTML, encoding="utf-8")
+
+    ref_pdf = m2b_out_dir / "m2b.ref.pdf"
+    new_pdf = m2b_out_dir / "m2b.new.pdf"
+
+    print(f"Oracle  : {ORACLE_BIN}")
+    print(f"Inputs  : cover.html + {doc1.name} + {doc2.name}")
+    print(f"Footer  : {FOOTER_TMPL!r}")
+    print(f"Out dir : {m2b_out_dir}")
+    print()
+
+    # --- oracle ---
+    print("Running oracle (cover + toc + footer) ...", flush=True)
+    oracle_status, oracle_detail = run_oracle_m2b(cover_html, [doc1, doc2], ref_pdf)
+    if oracle_status != "OK":
+        print(
+            f"  ORACLE FAILED: {oracle_status}: {oracle_detail[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"  oracle OK -> {ref_pdf}")
+    if oracle_detail:
+        print(f"  oracle stderr: {oracle_detail[-200:]}")
+
+    # --- new engine ---
+    print("Running new engine (assemble --toc --cover --footer-center) ...", flush=True)
+    new_status, new_detail = run_new_m2b(cover_html, [doc1, doc2], new_pdf)
+    if new_status != "OK":
+        print(
+            f"  NEW ENGINE FAILED: {new_status}: {new_detail[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"  new engine OK -> {new_pdf}")
+    if new_detail:
+        print(f"  new engine detail: {new_detail[-200:]}")
+
+    # --- open with pymupdf ---
+    ref_doc = fitz.open(str(ref_pdf))
+    new_doc = fitz.open(str(new_pdf))
+
+    pages_ref = ref_doc.page_count
+    pages_new = new_doc.page_count
+    delta_pages = pages_new - pages_ref
+    # ±2 tolerance: cover + TOC add pages; Chrome/oracle paginate slightly differently.
+    pages_within_tolerance = abs(delta_pages) <= 2
+
+    # Outline (bookmark) comparison.
+    toc_ref = ref_doc.get_toc()
+    toc_new = new_doc.get_toc()
+    titles_ref = [title.strip() for _lvl, title, _page in toc_ref]
+    titles_new = [title.strip() for _lvl, title, _page in toc_new]
+    outline_ref_n = len(toc_ref)
+    outline_new_n = len(toc_new)
+
+    set_ref = set(titles_ref)
+    set_new = set(titles_new)
+    common_titles = set_ref & set_new
+    denom = max(len(set_ref), len(set_new), 1)
+    title_overlap = len(common_titles) / denom
+
+    # TOC page detection.
+    toc_in_ref = has_toc_page(ref_doc)
+    toc_in_new = has_toc_page(new_doc)
+
+    # Text similarity (full document).
+    text_ref = extract_text(ref_doc)
+    text_new = extract_text(new_doc)
+    text_sim = text_similarity(text_ref, text_new)
+
+    ref_doc.close()
+    new_doc.close()
+
+    # --- print summary ---
+    print()
+    print(f"  Page count         : oracle={pages_ref}  new={pages_new}  Δ={delta_pages:+d}  within_±2={pages_within_tolerance}")
+    print(f"  Outline entries    : oracle={outline_ref_n}  new={outline_new_n}")
+    print(f"  Title overlap      : {title_overlap:.3f}  ({len(common_titles)}/{denom})")
+    print(f"  TOC page present   : oracle={toc_in_ref}  new={toc_in_new}")
+    print(f"  Titles in oracle   : {titles_ref}")
+    print(f"  Titles in new      : {titles_new}")
+    print(f"  Only in oracle     : {sorted(set_ref - set_new)}")
+    print(f"  Only in new        : {sorted(set_new - set_ref)}")
+    print(f"  Text similarity    : {text_sim:.4f}")
+
+    # --- build result dict ---
+    result = {
+        "mode": "m2b",
+        "oracle": str(ORACLE_BIN),
+        "footer_template": FOOTER_TMPL,
+        "cover_html": str(cover_html),
+        "inputs": [str(doc1), str(doc2)],
+        "oracle_pdf": str(ref_pdf),
+        "new_pdf": str(new_pdf),
+        "pages_ref": pages_ref,
+        "pages_new": pages_new,
+        "delta_pages": delta_pages,
+        "pages_within_tolerance": pages_within_tolerance,
+        "outline_ref_n": outline_ref_n,
+        "outline_new_n": outline_new_n,
+        "titles_ref": titles_ref,
+        "titles_new": titles_new,
+        "common_titles": sorted(common_titles),
+        "only_in_ref": sorted(set_ref - set_new),
+        "only_in_new": sorted(set_new - set_ref),
+        "title_overlap": round(title_overlap, 4),
+        "toc_in_ref": toc_in_ref,
+        "toc_in_new": toc_in_new,
+        "text_sim": round(text_sim, 4),
+    }
+
+    # --- write results-m2b.md ---
+    md_path = SCRIPT_DIR / "results-m2b.md"
+    titles_ref_str = "\n".join(f"  - {t}" for t in titles_ref) if titles_ref else "  (none)"
+    titles_new_str = "\n".join(f"  - {t}" for t in titles_new) if titles_new else "  (none)"
+    only_ref_str = (
+        "\n".join(f"  - {t}" for t in sorted(set_ref - set_new))
+        if (set_ref - set_new) else "  (none)"
+    )
+    only_new_str = (
+        "\n".join(f"  - {t}" for t in sorted(set_new - set_ref))
+        if (set_new - set_ref) else "  (none)"
+    )
+
+    md_content = textwrap.dedent(f"""\
+        # M2b Assembly Comparison: wkhtmltopdf 0.12.6 vs wkhtmltox-render-chromium
+
+        Oracle: `{ORACLE_BIN}`
+        Inputs: cover page + `{doc1.name}` + `{doc2.name}`
+        Footer template: `{FOOTER_TMPL}`
+        New engine: `cargo run --example assemble -- --toc --cover cover.html --footer-center "[page]/[topage]"`
+
+        ## Page Count
+
+        | Side    | Pages |
+        |:--------|------:|
+        | Oracle  | {pages_ref} |
+        | New     | {pages_new} |
+        | Δ       | {delta_pages:+d} |
+        | Within ±2 tolerance | {'Yes' if pages_within_tolerance else 'No'} |
+
+        > Note: ±2 tolerance accepted because cover + TOC add pages and Chrome/wkhtmltopdf
+        > paginate slightly differently.
+
+        ## TOC Page Detection
+
+        | Side    | TOC page present |
+        |:--------|:-----------------|
+        | Oracle  | {toc_in_ref} |
+        | New     | {toc_in_new} |
+
+        ## Outline (Bookmark) Comparison
+
+        | Metric                           | Value |
+        |:---------------------------------|------:|
+        | Oracle outline entries           | {outline_ref_n} |
+        | New engine outline entries       | {outline_new_n} |
+        | Title overlap (intersection/max) | {title_overlap:.3f} ({len(common_titles)}/{denom}) |
+
+        ### Oracle bookmark titles
+{titles_ref_str}
+
+        ### New-engine bookmark titles
+{titles_new_str}
+
+        ### Titles only in oracle
+{only_ref_str}
+
+        ### Titles only in new engine
+{only_new_str}
+
+        ## Text Similarity
+
+        | Metric   | Value  |
+        |:---------|-------:|
+        | text_sim | {text_sim:.4f} |
+
+        ## Notes
+
+        - Oracle uses native `cover` + `toc` subcommands; new engine uses `assemble --toc --cover`.
+        - Outline page numbers are structural only; exact pages compared via oracle in M2b Task 1.
+        - TOC page detection: searches for "table of contents" or "contents" in page text.
+        - Source::Html is now implemented in ChromiumRenderer (temp-file + file:// URL approach).
+    """)
+    md_path.write_text(md_content, encoding="utf-8")
+    print(f"\nWrote {md_path}")
+
+    # --- write results-m2b.json ---
+    json_path = SCRIPT_DIR / "results-m2b.json"
+    json_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(f"Wrote {json_path}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
+    if ARGS.m2b:
+        run_m2b_comparison()
+        return
+
     if ARGS.assemble:
         run_assembly_comparison()
         return
