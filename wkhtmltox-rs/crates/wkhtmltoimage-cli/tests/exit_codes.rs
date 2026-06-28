@@ -10,11 +10,19 @@ fn bin() -> Command {
 #[test]
 fn missing_local_input_is_nonzero() {
     // A local path that does not exist must fail (oracle returns nonzero).
-    let status = bin()
+    // Assert on the existence-guard's stderr message — not merely nonzero —
+    // so the test pins the guard path specifically and cannot pass for the
+    // wrong reason (e.g. a Chrome-spawn failure in a browserless environment).
+    let out = bin()
         .args(["/no/such/input/file_xyz.html", "/tmp/out_should_not_exist.png"])
-        .status()
+        .output()
         .expect("spawn");
-    assert!(!status.success(), "missing input must be nonzero, got {status:?}");
+    assert!(!out.status.success(), "missing input must be nonzero, got {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("input file not found"),
+        "expected existence-guard message, got stderr: {stderr}"
+    );
 }
 
 #[test]
