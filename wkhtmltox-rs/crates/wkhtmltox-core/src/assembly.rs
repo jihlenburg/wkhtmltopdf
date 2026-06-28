@@ -75,6 +75,50 @@ pub struct AssembleOpts {
     /// Settings for the built-in default TOC renderer (caption text, dotted
     /// lines, indentation, font scale).  Ignored when `toc_xsl` is `Some`.
     pub toc_settings: crate::tocxsl::TocXslSettings,
+
+    // ── HTML header/footer (Task 3 / Milestone 10) ────────────────────────────
+
+    /// HTML header URL or bare filesystem path rendered as a running header.
+    ///
+    /// When `Some`, the HTML is loaded once per content page with per-page
+    /// variables appended as a `?…` query string (matching upstream wkhtmltopdf).
+    /// The rendered PDF is overlaid into the top-margin band.  The top margin
+    /// (`geom.margin_top_mm`) is the band height; if zero the header is skipped.
+    ///
+    /// Mutually exclusive with text-cell `header`: when this is `Some` the
+    /// text-cell header is suppressed for that slot.
+    pub header_html: Option<String>,
+
+    /// HTML footer URL or bare filesystem path rendered as a running footer.
+    ///
+    /// Same rules as `header_html`; placed in the bottom-margin band.
+    pub footer_html: Option<String>,
+
+    /// Reserved spacing (mm) between the header band bottom and the content
+    /// area top.  **v1: stored but not yet applied to the geometry** — the user
+    /// controls the gap via `--margin-top`.  Kept for API compatibility with
+    /// Task 4 / CLI wiring.
+    pub header_spacing_mm: f64,
+
+    /// Reserved spacing (mm) between the footer band top and the content area
+    /// bottom.  Same v1 caveat as `header_spacing_mm`.
+    pub footer_spacing_mm: f64,
+
+    /// `--replace name value` pairs appended to the HTML header/footer URL as
+    /// extra query parameters on every page.
+    pub replacements: Vec<(String, String)>,
+
+    /// Date string for the `date=` / `[date]` variable (e.g. `"2026-06-28"`).
+    ///
+    /// Core does **not** call the system clock; the CLI fills this in Task 4.
+    /// Leave empty to suppress the variable in HTML headers (blank in the URL).
+    pub date: String,
+
+    /// ISO-8601 date string for the `isodate=` variable.
+    pub isodate: String,
+
+    /// Time string for the `time=` variable (e.g. `"12:00:00"`).
+    pub time: String,
 }
 
 impl Default for AssembleOpts {
@@ -91,6 +135,14 @@ impl Default for AssembleOpts {
             load: LoadSettings::default(),
             toc_xsl: None,
             toc_settings: crate::tocxsl::TocXslSettings::default(),
+            header_html: None,
+            footer_html: None,
+            header_spacing_mm: 0.0,
+            footer_spacing_mm: 0.0,
+            replacements: Vec::new(),
+            date: String::new(),
+            isodate: String::new(),
+            time: String::new(),
         }
     }
 }
@@ -305,12 +357,18 @@ pub fn assemble_pdf(
         merged
     };
 
+    // Text-cell header/footer: when the HTML slot is configured for a given
+    // side, the HTML overlay takes precedence and the text-cell slot is
+    // suppressed.  This also governs whether the legacy `number` path is
+    // gated on "no cells".
+    let has_cells = (opts.header.is_some() && opts.header_html.is_none())
+        || (opts.footer.is_some() && opts.footer_html.is_none());
+
     // Optionally stamp simple page-number footers (legacy `number` path).
     // Skipped when header/footer cells are configured — the user should put
     // `[page]` in their template instead.
     // Note: this path is not cover-aware (all pages including the cover are
     // stamped). For cover-page-aware numbering, use `footer.center = "[page]/[topage]"`.
-    let has_cells = opts.header.is_some() || opts.footer.is_some();
     let before_cells = if opts.number && !has_cells {
         let numbered = work.path().join("numbered.pdf");
         wkhtmltox_pdf_sys::stamp_footer(&after_outline, &numbered, "[page] / [topage]", 1)
@@ -372,8 +430,25 @@ pub fn assemble_pdf(
         after_links
     };
 
-    // Copy result to the caller-supplied destination before `work` is dropped.
-    std::fs::copy(&copy_src, out).map_err(|e| WkError::Io(e.to_string()))?;
+    // Optionally apply HTML header/footer overlays as the final post-processing step.
+    // When configured, reads the assembled PDF, renders the header/footer HTML once
+    // per content page (with per-page query variables), and batch-overlays them.
+    if opts.header_html.is_some() || opts.footer_html.is_some() {
+        let assembled = std::fs::read(&copy_src).map_err(|e| WkError::Io(e.to_string()))?;
+        let overlaid = render_html_overlays(
+            r,
+            &assembled,
+            geom,
+            opts,
+            total_pages,
+            cover_pages,
+            &outline_items,
+        )?;
+        std::fs::write(out, &overlaid).map_err(|e| WkError::Io(e.to_string()))?;
+    } else {
+        // Fast path: no HTML overlays — just copy the assembled file.
+        std::fs::copy(&copy_src, out).map_err(|e| WkError::Io(e.to_string()))?;
+    }
 
     // `work` drops here → TempDir removes the directory unconditionally.
     Ok(AssemblyReport {
@@ -575,8 +650,11 @@ fn assemble_with_toc(
         merged
     };
 
+    // Text-cell header/footer: HTML overlay takes precedence per slot.
+    let has_cells = (opts.header.is_some() && opts.header_html.is_none())
+        || (opts.footer.is_some() && opts.footer_html.is_none());
+
     // Optionally stamp simple page-number footers (legacy path).
-    let has_cells = opts.header.is_some() || opts.footer.is_some();
     let before_cells = if opts.number && !has_cells {
         let numbered = work.join("numbered.pdf");
         wkhtmltox_pdf_sys::stamp_footer(&after_outline, &numbered, "[page] / [topage]", 1)
@@ -604,7 +682,22 @@ fn assemble_with_toc(
         before_cells
     };
 
-    std::fs::copy(&final_path, out).map_err(|e| WkError::Io(e.to_string()))?;
+    // Optionally apply HTML header/footer overlays.
+    if opts.header_html.is_some() || opts.footer_html.is_some() {
+        let assembled = std::fs::read(&final_path).map_err(|e| WkError::Io(e.to_string()))?;
+        let overlaid = render_html_overlays(
+            r,
+            &assembled,
+            geom,
+            opts,
+            total_pages,
+            cover_pages,
+            &all_outline,
+        )?;
+        std::fs::write(out, &overlaid).map_err(|e| WkError::Io(e.to_string()))?;
+    } else {
+        std::fs::copy(&final_path, out).map_err(|e| WkError::Io(e.to_string()))?;
+    }
 
     Ok(AssemblyReport {
         pages: total_pages,
@@ -667,26 +760,26 @@ fn build_cell_strings(
             sitepages: non_cover_pages,
         };
 
-        // Header row: top-left, top-center, top-right
-        let (hl, hc, hr) = if let Some(h) = &opts.header {
-            (
+        // Header row: top-left, top-center, top-right.
+        // Suppressed when header_html is configured (HTML overlay takes precedence).
+        let (hl, hc, hr) = match (&opts.header, &opts.header_html) {
+            (Some(h), None) => (
                 crate::headerfooter::substitute(&h.left, &ctx),
                 crate::headerfooter::substitute(&h.center, &ctx),
                 crate::headerfooter::substitute(&h.right, &ctx),
-            )
-        } else {
-            (String::new(), String::new(), String::new())
+            ),
+            _ => (String::new(), String::new(), String::new()),
         };
 
-        // Footer row: bottom-left, bottom-center, bottom-right
-        let (fl, fc, fr) = if let Some(f) = &opts.footer {
-            (
+        // Footer row: bottom-left, bottom-center, bottom-right.
+        // Suppressed when footer_html is configured (HTML overlay takes precedence).
+        let (fl, fc, fr) = match (&opts.footer, &opts.footer_html) {
+            (Some(f), None) => (
                 crate::headerfooter::substitute(&f.left, &ctx),
                 crate::headerfooter::substitute(&f.center, &ctx),
                 crate::headerfooter::substitute(&f.right, &ctx),
-            )
-        } else {
-            (String::new(), String::new(), String::new())
+            ),
+            _ => (String::new(), String::new(), String::new()),
         };
 
         cells.push(hl);
@@ -698,4 +791,162 @@ fn build_cell_strings(
     }
 
     cells
+}
+
+// ── HTML header/footer overlay helpers ────────────────────────────────────────
+
+/// Convert a bare filesystem path to a `file://` URL, or pass through if the
+/// value already carries a URL scheme (`http://`, `https://`, `file://`, `data:`).
+///
+/// Only space → `%20` is percent-encoded; other characters are left as-is
+/// (sufficient for typical local paths on macOS/Linux).
+fn ensure_url(path_or_url: &str) -> String {
+    if path_or_url.starts_with("http://")
+        || path_or_url.starts_with("https://")
+        || path_or_url.starts_with("file://")
+        || path_or_url.starts_with("data:")
+    {
+        path_or_url.to_string()
+    } else {
+        // Bare filesystem path → file:// URL.
+        format!("file://{}", path_or_url.replace(' ', "%20"))
+    }
+}
+
+/// Render HTML header and/or footer overlays onto the assembled PDF bytes.
+///
+/// For every content page (0-based global index `>= cover_pages`):
+/// - builds a [`crate::headerfooter::PageCtx`] with per-page variables,
+/// - calls [`crate::headerfooter::header_footer_query`] to build the URL,
+/// - renders the URL via the [`Renderer`] using `opts.load` (so `--safe` /
+///   [`crate::policy::ResourcePolicy`] applies to header/footer HTML too),
+/// - writes the result to a temporary PDF file,
+/// - accumulates an [`wkhtmltox_pdf_sys::OverlaySpec`].
+///
+/// After all pages are rendered, one [`wkhtmltox_pdf_sys::overlay_pages`] call
+/// batch-overlays every header/footer PDF onto the assembled document.
+///
+/// **Coordinates (v1):**
+/// - Header: `ty = page_height_pt − header_band_pt`, `tx = 0`.
+/// - Footer: `ty = 0`, `tx = 0`.
+/// - Band heights equal the configured top/bottom margins from `geom`.
+///
+/// If a margin is zero the corresponding overlay is skipped (no degenerate page).
+fn render_html_overlays(
+    r: &mut dyn Renderer,
+    assembled: &[u8],
+    geom: &PageGeometry,
+    opts: &AssembleOpts,
+    total_pages: u32,
+    cover_pages: u32,
+    outline_items: &[(String, u32, u8)],
+) -> Result<Vec<u8>> {
+    let render_header = opts.header_html.is_some() && geom.margin_top_mm > 0.0;
+    let render_footer = opts.footer_html.is_some() && geom.margin_bottom_mm > 0.0;
+    if !render_header && !render_footer {
+        return Ok(assembled.to_vec());
+    }
+
+    let page_height_pt = geom.height_mm * 72.0 / 25.4;
+    let header_band_pt = geom.margin_top_mm * 72.0 / 25.4;
+    let non_cover_pages = total_pages.saturating_sub(cover_pages);
+
+    // Geometry for the header band: full page width × top-margin height, no margins.
+    let header_geom = PageGeometry {
+        width_mm: geom.width_mm,
+        height_mm: geom.margin_top_mm,
+        margin_top_mm: 0.0,
+        margin_bottom_mm: 0.0,
+        margin_left_mm: 0.0,
+        margin_right_mm: 0.0,
+        generate_document_outline: false,
+        ..geom.clone()
+    };
+
+    // Geometry for the footer band: full page width × bottom-margin height, no margins.
+    let footer_geom = PageGeometry {
+        width_mm: geom.width_mm,
+        height_mm: geom.margin_bottom_mm,
+        margin_top_mm: 0.0,
+        margin_bottom_mm: 0.0,
+        margin_left_mm: 0.0,
+        margin_right_mm: 0.0,
+        generate_document_outline: false,
+        ..geom.clone()
+    };
+
+    let header_base_url: Option<String> = if render_header {
+        opts.header_html.as_deref().map(ensure_url)
+    } else {
+        None
+    };
+    let footer_base_url: Option<String> = if render_footer {
+        opts.footer_html.as_deref().map(ensure_url)
+    } else {
+        None
+    };
+
+    // Temp directory holds per-page overlay PDFs; must outlive the overlay_pages call.
+    let overlay_dir = tempfile::TempDir::new().map_err(|e| WkError::Io(e.to_string()))?;
+    let mut specs: Vec<wkhtmltox_pdf_sys::OverlaySpec> = Vec::new();
+
+    for page_0based in cover_pages..total_pages {
+        let page_1based = page_0based - cover_pages + 1;
+        let (section, subsection) =
+            crate::headerfooter::active_section_subsection(outline_items, page_0based);
+
+        let ctx = crate::headerfooter::PageCtx {
+            page: page_1based,
+            frompage: 1,
+            topage: non_cover_pages,
+            webpage: String::new(),
+            section,
+            subsection,
+            subsubsection: String::new(),
+            date: opts.date.clone(),
+            isodate: opts.isodate.clone(),
+            time: opts.time.clone(),
+            title: opts.doc_title.clone(),
+            doctitle: opts.doc_title.clone(),
+            sitepage: page_1based,
+            sitepages: non_cover_pages,
+        };
+
+        // ── Header overlay ────────────────────────────────────────────────────
+        if let Some(ref base_url) = header_base_url {
+            let url =
+                crate::headerfooter::header_footer_query(base_url, &ctx, &opts.replacements);
+            let ph = r.open(&Source::Url(url), &opts.load)?;
+            r.wait_ready(ph, &ReadyPolicy::default())?;
+            let bytes = r.print_pdf(ph, &header_geom)?;
+            let path = overlay_dir.path().join(format!("hdr_{page_0based}.pdf"));
+            std::fs::write(&path, &bytes).map_err(|e| WkError::Io(e.to_string()))?;
+            specs.push(wkhtmltox_pdf_sys::OverlaySpec {
+                overlay_path: path.to_string_lossy().into_owned(),
+                page_index: page_0based,
+                tx: 0.0,
+                ty: page_height_pt - header_band_pt,
+            });
+        }
+
+        // ── Footer overlay ────────────────────────────────────────────────────
+        if let Some(ref base_url) = footer_base_url {
+            let url =
+                crate::headerfooter::header_footer_query(base_url, &ctx, &opts.replacements);
+            let ph = r.open(&Source::Url(url), &opts.load)?;
+            r.wait_ready(ph, &ReadyPolicy::default())?;
+            let bytes = r.print_pdf(ph, &footer_geom)?;
+            let path = overlay_dir.path().join(format!("ftr_{page_0based}.pdf"));
+            std::fs::write(&path, &bytes).map_err(|e| WkError::Io(e.to_string()))?;
+            specs.push(wkhtmltox_pdf_sys::OverlaySpec {
+                overlay_path: path.to_string_lossy().into_owned(),
+                page_index: page_0based,
+                tx: 0.0,
+                ty: 0.0,
+            });
+        }
+    }
+
+    // One batch overlay call; overlay_dir keeps the temp files alive until after this.
+    wkhtmltox_pdf_sys::overlay_pages(assembled, &specs).map_err(WkError::Pdf)
 }

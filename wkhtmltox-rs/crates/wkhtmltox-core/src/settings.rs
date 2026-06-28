@@ -401,6 +401,15 @@ impl GlobalSettings {
             load: self.to_load_settings(),
             toc_xsl: self.toc_xsl.clone(),
             toc_settings: self.toc_settings.clone(),
+            // HTML header/footer fields — wired in Task 4; zero/None defaults here.
+            header_html: None,
+            footer_html: None,
+            header_spacing_mm: 0.0,
+            footer_spacing_mm: 0.0,
+            replacements: Vec::new(),
+            date: String::new(),
+            isodate: String::new(),
+            time: String::new(),
         }
     }
 
