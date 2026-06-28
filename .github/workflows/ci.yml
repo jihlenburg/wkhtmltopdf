@@ -1,0 +1,82 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  lint-test:
+    name: lint + test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: wkhtmltox-rs
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install qpdf (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libqpdf-dev qpdf
+      - name: Install qpdf (macOS)
+        if: runner.os == 'macOS'
+        run: brew install qpdf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wkhtmltox-rs
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy (production libs, -D warnings)
+        run: cargo clippy --workspace --lib -- -D warnings
+      - name: build
+        run: cargo build --workspace
+      - name: test (non-gated; Chrome e2e are #[ignore])
+        run: cargo test --workspace
+      - name: cargo-audit
+        run: cargo install --locked cargo-audit && cargo audit
+      - name: cargo-deny
+        run: cargo install --locked cargo-deny && cargo deny --manifest-path Cargo.toml check --config ../deny.toml
+      - name: static security audit
+        run: bash ../scripts/security-audit.sh --full
+
+  compat-gate:
+    name: compat gate vs wkhtmltopdf 0.12.6 oracle (Linux)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: wkhtmltox-rs
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build + runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libqpdf-dev qpdf python3-pip fonts-liberation \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libasound2
+          python3 -m pip install --quiet pymupdf numpy scikit-image
+      - name: Install wkhtmltopdf 0.12.6 oracle (jammy .deb)
+        run: |
+          curl -fsSL -o /tmp/wkhtmltox.deb \
+            https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_amd64.deb
+          sudo apt-get install -y /tmp/wkhtmltox.deb
+          echo "WKHTMLTOX_ORACLE=/usr/local/bin/wkhtmltopdf" >> "$GITHUB_ENV"
+          echo "WKHTMLTOX_IMAGE_ORACLE=/usr/local/bin/wkhtmltoimage" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wkhtmltox-rs
+      - name: Bundle chrome-headless-shell next to the render example
+        run: bash ../scripts/package.sh --no-chrome  # builds release bins
+      - name: Install a headless Chrome for the harness
+        uses: browser-actions/setup-chrome@v1
+        id: chrome
+      - name: Run compat gate
+        env:
+          WKHTMLTOX_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: python3 tests/compat/compare.py --gate
