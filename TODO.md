@@ -17,7 +17,7 @@ and security-audited (`scripts/security-audit.sh` + review) before push.
 - [ ] Font-substitution fidelity spike
 - [ ] `--xsl-style-sheet` custom-XSLT TOC (libxslt) + HTML headers/footers (v1 is text cells only)
 - [ ] TOC-entry clickable links; content link-rect coordinate accuracy; named-`/Dest` resolution; Latin-1 titles
-- [ ] Security hardening: DNS-rebinding (hostname→private IP) resolution; percent-encoded host decode; finer http_error
+- [ ] **M9 candidate — SSRF forward-resolver (closes M8 residuals):** a bounded/timeout-capped resolver that *pins* the IP Chrome connects to (URL-rewrite for HTTP / `--host-resolver-rules` / a controlled forward proxy). Closes BOTH the residual active DNS-rebinding TOCTOU AND the M8 blocking-DNS DoS (serialized `to_socket_addrs` on the pump thread under `--safe`) — one architectural fix. (Percent-encoded host decode: NOT needed — the M8 gap audit verified Chrome's WHATWG URL normalization strips it before our policy sees it.) Also: finer `http_error` mapping.
 - [ ] C-ABI: warning-callback surfacing; per-row header/footer font size. CLI: `--quiet`; full ~100-flag parity; manpage; `--read-args-from-stdin`; per-page layout flags
 - [ ] `--no-images` for the **PDF** path (`wkhtmltopdf`): M6 wired it for images only; PDF `GlobalSettings.to_load_settings()` still hardcodes `load_images: true` and `web.loadImages` stays unimplemented in `set_global`, so the flag is a silent no-op for PDF (works for `wkhtmltoimage`). Also: M6 form probe runs after `print_pdf` (cleaner alongside the link probe); thresholds.json floors are default-corpus-specific (legacy corpus needs its own).
 - [ ] Deferred M1 Minors + 2 `useless_vec` lints in pdfread test code; `compile_commands.json` for IDE
@@ -25,6 +25,7 @@ and security-audited (`scripts/security-audit.sh` + review) before push.
 - [ ] CI/packaging hardening (M7 review minors): SHA-pin `dtolnay/rust-toolchain@stable` (only mutable action ref); SHA-256-verify downloaded `chrome-headless-shell` (package.sh) + the 0.12.6 oracle `.deb` (ci.yml); pin `cargo-audit`/`cargo-deny` tool versions in CI; dedupe push+PR double-runs on same-repo branches. Windows packaging/CI (with the Windows backend). Optional: refactor `scripts/package.sh` into the spec's `xtask` crate.
 
 ## Done
+- [x] **M8 — SSRF / security hardening** (post-v1; driven by an adversarially-verified gap audit: 12 findings → 6 confirmed, 6 refuted). Closed: `localhost`/`.localhost`/`ip6-*` loopback aliases under `--safe`; hostnames that **DNS-resolve to a private IP** (injectable `Resolver` trait + `SystemResolver`; `decide()` stays pure via `NoopResolver`); missing ranges CGNAT `100.64/10`, full `0.0.0.0/8`, NAT64 `64:ff9b::/96`. Single renderer chokepoint (`fetch_action`→`decide_with_resolver`); both gated e2e PASS on real Chrome (new localhost-block + M4 private-IP regression). **Opus security review: READY, Security PASS, 0 Critical**; permissive default airtight, range boundaries re-derived correct. Static audit HIGH=0. Residuals → M9: active DNS-rebinding TOCTOU + blocking-DNS DoS (both gated behind `--safe`, documented). `cbe0834..f37e34e`.
 - [x] **M1 — Skeleton + Chromium renderer + AcroForm spike**.
 - [x] **Security-audit hook** (caught + fixed RUSTSEC-2026-0187).
 - [x] **Compat-profile v1** (`--compat` UA-reset).
