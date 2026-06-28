@@ -4,6 +4,64 @@
 //! is drop-in compatible. XSLT is applied via the rendering engine's `XSLTProcessor`
 //! (no native libxslt dependency).
 
+use crate::render::{LoadSettings, ReadyPolicy, Renderer, Source};
+
+/// Transform `xml` with `xsl` using the rendering engine's XSLTProcessor.
+///
+/// Opens a blank page, evaluates a JS snippet that runs `DOMParser` + `XSLTProcessor`,
+/// and returns the serialized output HTML.  No network is performed.
+///
+/// Fails closed: any parse error, transform failure, or empty result returns `Err`.
+pub fn transform_toc(r: &mut dyn Renderer, xml: &str, xsl: &str) -> crate::error::Result<String> {
+    let page = r.open(
+        &Source::Html("<!doctype html><html><body></body></html>".into()),
+        &LoadSettings::default(),
+    )?;
+    r.wait_ready(page, &ReadyPolicy::default())?;
+    let xml_lit = serde_json::to_string(xml).unwrap_or_else(|_| "\"\"".into());
+    let xsl_lit = serde_json::to_string(xsl).unwrap_or_else(|_| "\"\"".into());
+    let script = format!(
+        r#"(() => {{
+  try {{
+    const xml = {xml_lit};
+    const xsl = {xsl_lit};
+    const p = new DOMParser();
+    const xmlDoc = p.parseFromString(xml, "application/xml");
+    const xslDoc = p.parseFromString(xsl, "application/xml");
+    if (xmlDoc.querySelector("parsererror") || xslDoc.querySelector("parsererror"))
+      return {{ ok: false, err: "parse error in outline XML or stylesheet" }};
+    const proc = new XSLTProcessor();
+    proc.importStylesheet(xslDoc);
+    const out = proc.transformToDocument(xmlDoc);
+    if (!out) return {{ ok: false, err: "XSLT transform returned null" }};
+    const html = new XMLSerializer().serializeToString(out);
+    if (!html) return {{ ok: false, err: "XSLT serializer returned empty string" }};
+    return {{ ok: true, html }};
+  }} catch (e) {{ return {{ ok: false, err: String(e) }}; }}
+}})()"#,
+        xml_lit = xml_lit,
+        xsl_lit = xsl_lit
+    );
+    let v = r.eval_json(page, &script)?;
+    if v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
+        let html = v.get("html").and_then(|h| h.as_str()).unwrap_or("").to_string();
+        if html.is_empty() {
+            return Err(crate::error::WkError::Xslt(
+                "XSLT transform produced empty output".into(),
+            ));
+        }
+        Ok(html)
+    } else {
+        let err = v
+            .get("err")
+            .and_then(|e| e.as_str())
+            .unwrap_or("unknown XSLT error");
+        Err(crate::error::WkError::Xslt(format!(
+            "XSLT TOC transform failed: {err}"
+        )))
+    }
+}
+
 /// XML-escape text for an attribute/element value.
 pub fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

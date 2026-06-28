@@ -389,6 +389,8 @@ impl GlobalSettings {
             doc_title: self.document_title.clone(),
             cover,
             load: self.to_load_settings(),
+            toc_xsl: None,
+            toc_settings: crate::tocxsl::TocXslSettings::default(),
         }
     }
 

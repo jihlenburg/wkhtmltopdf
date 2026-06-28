@@ -62,6 +62,19 @@ pub struct AssembleOpts {
     /// `LoadSettings::default()` (no cookies, JS disabled, local-file allowed
     /// per the permissive default).
     pub load: LoadSettings,
+    /// Optional path to a custom XSLT stylesheet (`--xsl-style-sheet`).
+    ///
+    /// When `Some`, the TOC is generated via the rendering engine's
+    /// `XSLTProcessor` using the provided file as the stylesheet.  The outline
+    /// XML is built by [`crate::tocxsl::outline_to_xml`] and transformed via
+    /// [`crate::tocxsl::transform_toc`].
+    ///
+    /// When `None` (default), [`crate::toc::render_toc_html`] is used with
+    /// the settings from `toc_settings`.
+    pub toc_xsl: Option<String>,
+    /// Settings for the built-in default TOC renderer (caption text, dotted
+    /// lines, indentation, font scale).  Ignored when `toc_xsl` is `Some`.
+    pub toc_settings: crate::tocxsl::TocXslSettings,
 }
 
 impl Default for AssembleOpts {
@@ -76,6 +89,8 @@ impl Default for AssembleOpts {
             doc_title: String::new(),
             cover: None,
             load: LoadSettings::default(),
+            toc_xsl: None,
+            toc_settings: crate::tocxsl::TocXslSettings::default(),
         }
     }
 }
@@ -482,7 +497,15 @@ fn assemble_with_toc(
             .iter()
             .map(|(t, g, l)| (t.clone(), g + 1, *l))
             .collect();
-        let toc_html = crate::toc::render_toc_html(&toc_display);
+        let toc_html = if let Some(xsl_path) = &opts.toc_xsl {
+            let xsl = std::fs::read_to_string(xsl_path).map_err(|e| {
+                WkError::Io(format!("cannot read --xsl-style-sheet {xsl_path:?}: {e}"))
+            })?;
+            let xml = crate::tocxsl::outline_to_xml(&toc_display);
+            crate::tocxsl::transform_toc(r, &xml, &xsl)?
+        } else {
+            crate::toc::render_toc_html(&toc_display, &opts.toc_settings)
+        };
 
         // TODO(M3/M4): ChromiumRenderer must accept Source::Html for TOC.
         // Until then, TOC rendering is exercised via MockRenderer in tests; the

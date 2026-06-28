@@ -210,10 +210,13 @@ fn toc_with_mock_converges_and_offsets_bookmarks() {
 /// re-checked here so `cargo test -p wkhtmltox-core` covers it in one run).
 #[test]
 fn render_toc_html_unit() {
-    let html = wkhtmltox_core::toc::render_toc_html(&[
-        ("Intro".to_string(), 1u32, 1u8),
-        ("Sub".to_string(), 2u32, 2u8),
-    ]);
+    let html = wkhtmltox_core::toc::render_toc_html(
+        &[
+            ("Intro".to_string(), 1u32, 1u8),
+            ("Sub".to_string(), 2u32, 2u8),
+        ],
+        &wkhtmltox_core::tocxsl::TocXslSettings::default(),
+    );
     assert!(html.contains("Intro"));
     assert!(html.contains("Sub"));
     assert!(html.contains('1'));
