@@ -41,6 +41,8 @@ pub struct ChromiumRenderer {
     child: Child,
     user_data_dir: PathBuf,
     cdp: Cdp,
+    /// Compat CSS stored at `open()` time from `LoadSettings::compat_ua_css`.
+    compat_ua_css: Option<String>,
 }
 
 fn mm_to_in(mm: f64) -> f64 { mm / 25.4 }
@@ -101,7 +103,7 @@ impl ChromiumRenderer {
 
         // All succeeded — disarm the guard and hand ownership to ChromiumRenderer.
         let (child, user_data_dir) = guard.disarm();
-        Ok(Self { child, user_data_dir, cdp })
+        Ok(Self { child, user_data_dir, cdp, compat_ua_css: None })
     }
 }
 
@@ -114,12 +116,14 @@ impl Drop for ChromiumRenderer {
 }
 
 impl Renderer for ChromiumRenderer {
-    fn open(&mut self, src: &Source, _load: &LoadSettings) -> Result<PageHandle> {
+    fn open(&mut self, src: &Source, load: &LoadSettings) -> Result<PageHandle> {
         let url = match src {
             Source::Url(u) => u.clone(),
             Source::Html(_) | Source::Stdin =>
                 return Err(WkError::Engine("Html/Stdin sources land in a later milestone".into())),
         };
+        // Persist compat CSS so wait_ready() can inject it after the page loads.
+        self.compat_ua_css = load.compat_ua_css.clone();
         self.cdp.call("Page.navigate", json!({ "url": url }))?;
         Ok(PageHandle(1))
     }
@@ -141,6 +145,27 @@ impl Renderer for ChromiumRenderer {
                 return Err(WkError::Engine("timeout waiting for readyState=complete".into()));
             }
             std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // Inject compat UA-reset stylesheet if configured.
+        if let Some(css) = &self.compat_ua_css.clone() {
+            // JSON-encode the CSS string so any quotes/backticks are safely escaped.
+            let css_json = serde_json::to_string(css)
+                .map_err(|e| WkError::Engine(format!("compat css json encode: {e}")))?;
+            let js = format!(
+                r#"(function(){{
+  var existing = document.getElementById('__wkx_compat');
+  if (existing) {{ existing.parentNode.removeChild(existing); }}
+  var s = document.createElement('style');
+  s.id = '__wkx_compat';
+  s.textContent = {css_json};
+  (document.head || document.documentElement).appendChild(s);
+}})();"#
+            );
+            self.cdp.call(
+                "Runtime.evaluate",
+                json!({ "expression": js, "returnByValue": true }),
+            )?;
         }
 
         if ready.javascript_delay_ms > 0 {

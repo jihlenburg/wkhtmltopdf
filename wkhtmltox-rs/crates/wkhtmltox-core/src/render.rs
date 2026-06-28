@@ -26,6 +26,9 @@ pub struct LoadSettings {
     /// explicitly to match that behaviour.
     pub enable_javascript: bool,
     pub allow_local_file_access: bool,
+    /// When set, the renderer injects this CSS as a UA-reset `<style>` before
+    /// printing, to nudge output toward the wkhtmltopdf/Qt4-WebKit baseline.
+    pub compat_ua_css: Option<String>,
 }
 
 #[derive(Debug, Clone)]

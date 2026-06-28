@@ -48,6 +48,12 @@ parser.add_argument(
     help="Prefix for output files (results-PREFIX.md / results-PREFIX.json). "
          "Defaults to 'results' for the baseline corpus, or 'results-<dirname>' otherwise.",
 )
+parser.add_argument(
+    "--compat",
+    action="store_true",
+    default=False,
+    help="Pass --compat to the new-engine render example to enable the WK0126 UA-reset stylesheet.",
+)
 ARGS = parser.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -67,10 +73,16 @@ if ARGS.out_prefix:
     _prefix = ARGS.out_prefix
 elif ARGS.dir is not None:
     _prefix = f"results-{CORPUS_DIR.name}"
+    if ARGS.compat:
+        _prefix += "-compat"
 else:
-    _prefix = "results"
+    if ARGS.compat:
+        _prefix = "results-compat"
+    else:
+        _prefix = "results"
 
-OUT_DIR = SCRIPT_DIR / f"out-{CORPUS_DIR.name}"
+_out_suffix = f"{CORPUS_DIR.name}" + ("-compat" if ARGS.compat else "")
+OUT_DIR = SCRIPT_DIR / f"out-{_out_suffix}"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ORACLE_BIN = Path(os.environ.get("WKHTMLTOX_ORACLE", "/Users/jihlenburg/.local/wkhtmltox/bin/wkhtmltopdf"))
@@ -124,11 +136,13 @@ def render_new(html_path: Path, out_pdf: Path) -> tuple[str, str]:
     Run the Chromium example and return (status, detail).
     Status: "OK" | "NEW_CRASH" | "NEW_ERROR"
     """
+    extra_flags = ["--compat"] if ARGS.compat else []
     cmd = [
         "cargo", "run", "-q",
         "--example", "render",
         "-p", "wkhtmltox-render-chromium",
         "--",
+        *extra_flags,
         str(html_path.resolve()),
         str(out_pdf),
     ]

@@ -2,6 +2,9 @@
 //! Minimal CLI: render <input.html> to <output.pdf> via ChromiumRenderer.
 //! Geometry matches wkhtmltopdf defaults: A4, 10 mm margins, scale 1.0,
 //! print_background true, prefer_css_page_size false, generate_document_outline true.
+//!
+//! Flags (any position before the positional args):
+//!   --compat   inject the WK0126_UA_RESET stylesheet before printing
 
 use std::path::PathBuf;
 use wkhtmltox_core::render::*;
@@ -9,13 +12,25 @@ use wkhtmltox_render_chromium::renderer::ChromiumRenderer;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        eprintln!("Usage: render <input.html> <output.pdf>");
+
+    // Parse optional flags before the two positional args.
+    let mut compat = false;
+    let mut positional: Vec<&str> = Vec::new();
+    for arg in args.iter().skip(1) {
+        if arg == "--compat" {
+            compat = true;
+        } else {
+            positional.push(arg.as_str());
+        }
+    }
+
+    if positional.len() != 2 {
+        eprintln!("Usage: render [--compat] <input.html> <output.pdf>");
         std::process::exit(1);
     }
 
-    let input = PathBuf::from(&args[1]);
-    let output = PathBuf::from(&args[2]);
+    let input = PathBuf::from(positional[0]);
+    let output = PathBuf::from(positional[1]);
 
     let abs_input = input
         .canonicalize()
@@ -26,12 +41,19 @@ fn main() {
     let mut renderer = ChromiumRenderer::spawn()
         .unwrap_or_else(|e| { eprintln!("failed to spawn ChromiumRenderer: {e}"); std::process::exit(1); });
 
+    let compat_ua_css = if compat {
+        Some(wkhtmltox_core::compat::WK0126_UA_RESET.to_string())
+    } else {
+        None
+    };
+
     let page = renderer
         .open(
             &Source::Url(url),
             &LoadSettings {
                 enable_javascript: true,
                 allow_local_file_access: true,
+                compat_ua_css,
                 ..Default::default()
             },
         )
