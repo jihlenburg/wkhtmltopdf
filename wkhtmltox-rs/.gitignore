@@ -2,3 +2,7 @@
 # generated PDFs from compat harness
 tests/compat/out/
 tests/compat/out-*/
+# C consumer binary and any generated PDFs from ctest
+target/debug/consumer
+target/release/consumer
+*.pdf

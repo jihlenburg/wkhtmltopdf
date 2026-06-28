@@ -539,6 +539,68 @@ pub fn parse(args: &[String]) -> Result<ParsedInvocation, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Help text generation
+// ---------------------------------------------------------------------------
+
+/// Generate a human-readable usage and flag listing for `wkhtmltopdf`.
+///
+/// `extended = false` produces a concise listing (equivalent to `--help`).
+/// `extended = true` produces the same flag listing with a different header
+/// (equivalent to `--extended-help`); the full flag table is printed in both
+/// modes because it is compact.
+pub fn help_text(extended: bool) -> String {
+    let mut out = String::new();
+
+    out.push_str(concat!(
+        "Usage:\n",
+        "  wkhtmltopdf [GLOBAL OPTIONS]... [OBJECT] [OBJECT OPTIONS]... \\\n",
+        "              <input url/file/-> [<input>]... <output file/->\n\n",
+    ));
+
+    if extended {
+        out.push_str("Options (extended help — all flags listed):\n");
+    } else {
+        out.push_str("Options (use --extended-help for full documentation):\n");
+    }
+
+    for spec in FLAGS {
+        // Short-flag column: "-x, " or "    ".
+        let short_col = if let Some(ch) = spec.short {
+            format!("-{ch}, ")
+        } else {
+            "    ".to_owned()
+        };
+
+        // Arity hint appended to the long flag.
+        let hint: &str = match spec.action {
+            Action::Setting(_) => " <arg>",
+            Action::TwoArg(_) => " <k> <v>",
+            _ => "",
+        };
+
+        // Scope tag: Global-only vs. both global and per-object.
+        let scope: &str = match spec.target {
+            Target::Global => "global",
+            Target::Both => "global/object",
+        };
+
+        // Left column: "  -x, --long-flag <arg>"
+        let flag_col = format!("  {}--{}{}", short_col, spec.long, hint);
+
+        // Print padded to 46 chars so the scope tags line up.
+        out.push_str(&format!("{flag_col:<46}  ({scope})\n"));
+    }
+
+    out.push('\n');
+    if !extended {
+        out.push_str(
+            "Use --extended-help for documentation on less-used options.\n",
+        );
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
@@ -830,5 +892,33 @@ mod tests {
         assert_eq!(inv.global.page_size, NamedPageSize::A4);
         use wkhtmltox_core::settings::ColorMode;
         assert!(matches!(inv.global.color_mode, ColorMode::Grayscale));
+    }
+
+    // ── Tests 21–23: help_text generation ───────────────────────────────
+    #[test]
+    fn help_text_is_non_empty_and_contains_usage() {
+        let text = crate::help_text(false);
+        assert!(!text.is_empty(), "help text must not be empty");
+        assert!(text.contains("Usage"), "help text must contain 'Usage'");
+    }
+
+    #[test]
+    fn help_text_contains_known_flags() {
+        let text = crate::help_text(false);
+        assert!(text.contains("--page-size"), "expected --page-size in help text");
+        assert!(text.contains("--help"), "expected --help in help text");
+        assert!(text.contains("--version"), "expected --version in help text");
+        assert!(text.contains("--margin-top"), "expected --margin-top in help text");
+    }
+
+    #[test]
+    fn extended_help_text_also_contains_usage() {
+        let text = crate::help_text(true);
+        assert!(text.contains("Usage"), "extended help must contain 'Usage'");
+        assert!(
+            text.contains("extended help"),
+            "extended help header should say 'extended help'"
+        );
+        assert!(text.contains("--outline-depth"), "expected --outline-depth in extended help");
     }
 }

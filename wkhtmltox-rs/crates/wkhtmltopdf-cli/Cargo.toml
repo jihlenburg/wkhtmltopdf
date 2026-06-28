@@ -1,0 +1,15 @@
+[package]
+name = "wkhtmltopdf-cli"
+version = "0.12.6"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wkhtmltopdf"
+path = "src/main.rs"
+
+[dependencies]
+wkhtmltox-cli = { path = "../wkhtmltox-cli" }
+wkhtmltox-core = { path = "../wkhtmltox-core" }
+wkhtmltox-render-chromium = { path = "../wkhtmltox-render-chromium" }
+tempfile.workspace = true
