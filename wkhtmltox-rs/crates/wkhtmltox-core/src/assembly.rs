@@ -5,6 +5,55 @@ use crate::error::{Result, WkError};
 use crate::outline;
 use crate::render::{LoadSettings, PageGeometry, ReadyPolicy, Renderer, Source};
 
+/// Three text cells for one row (header or footer).
+///
+/// Each field is a template that may contain substitution tokens such as
+/// `[page]`, `[topage]`, `[section]`, `[title]`, `[date]`, `[time]`, etc.
+/// An empty string means "no content in that cell".
+#[derive(Debug, Clone, Default)]
+pub struct CellText {
+    pub left: String,
+    pub center: String,
+    pub right: String,
+}
+
+/// Options forwarded into [`assemble_pdf`].
+///
+/// All fields have sensible defaults via [`Default`]; typical usage is
+/// `AssembleOpts { number: true, ..Default::default() }`.
+#[derive(Debug, Clone)]
+pub struct AssembleOpts {
+    /// Stamp a centered `"[page] / [topage]"` footer (legacy shorthand).
+    /// Ignored when `header` or `footer` is `Some(…)` — use `footer.center`
+    /// instead to include a page number in the full cell layout.
+    pub number: bool,
+    /// Prepend a generated Table of Contents page.
+    pub with_toc: bool,
+    /// Three-cell header row stamped at the top of every page.
+    /// `None` = no header.
+    pub header: Option<CellText>,
+    /// Three-cell footer row stamped at the bottom of every page.
+    /// `None` = no footer.
+    pub footer: Option<CellText>,
+    /// Helvetica point size used for all header/footer cells (default 9.0).
+    pub header_footer_font_size: f64,
+    /// Document title substituted for `[title]` in header/footer templates.
+    pub doc_title: String,
+}
+
+impl Default for AssembleOpts {
+    fn default() -> Self {
+        Self {
+            number: false,
+            with_toc: false,
+            header: None,
+            footer: None,
+            header_footer_font_size: 9.0,
+            doc_title: String::new(),
+        }
+    }
+}
+
 /// Summary returned by [`assemble_pdf`].
 pub struct AssemblyReport {
     pub pages: u32,
@@ -13,9 +62,10 @@ pub struct AssemblyReport {
 
 /// Render each [`Source`] in `objects`, merge them into a single PDF at `out`,
 /// attach a combined `/Outlines` bookmark tree derived from the per-object heading
-/// probes, and — when `number` is `true` — stamp page-number footers.
+/// probes, and apply header/footer cells and/or page-number footers as configured
+/// in `opts`.
 ///
-/// When `with_toc` is `true` a Table of Contents page is prepended.  The TOC
+/// When `opts.with_toc` is `true` a Table of Contents page is prepended.  The TOC
 /// is rendered as a leading object and its page count is stabilised via a
 /// fixed-point loop (cap 3 iterations) so that the page numbers printed in the
 /// TOC match the final document layout.
@@ -31,8 +81,7 @@ pub fn assemble_pdf(
     objects: &[Source],
     geom: &PageGeometry,
     out: &Path,
-    number: bool,
-    with_toc: bool,
+    opts: &AssembleOpts,
 ) -> Result<AssemblyReport> {
     // Fix 2: reject empty input early.
     if objects.is_empty() {
@@ -44,12 +93,12 @@ pub fn assemble_pdf(
     let work = tempfile::TempDir::new().map_err(|e| WkError::Io(e.to_string()))?;
 
     // ── TOC path ──────────────────────────────────────────────────────────────
-    if with_toc {
-        return assemble_with_toc(r, objects, geom, out, number, work.path());
+    if opts.with_toc {
+        return assemble_with_toc(r, objects, geom, out, opts, work.path());
         // `work` drops here after assemble_with_toc returns.
     }
 
-    // ── Non-TOC path (unchanged) ──────────────────────────────────────────────
+    // ── Non-TOC path ──────────────────────────────────────────────────────────
     let mut outline_items: Vec<(String, u32, u8)> = Vec::new();
     let mut offset: u32 = 0;
     let mut parts: Vec<std::path::PathBuf> = Vec::with_capacity(objects.len());
@@ -98,14 +147,34 @@ pub fn assemble_pdf(
         merged
     };
 
-    // Optionally stamp page-number footers.
-    let final_path = if number {
+    // Optionally stamp simple page-number footers (legacy `number` path).
+    // Skipped when header/footer cells are configured — the user should put
+    // `[page]` in their template instead.
+    let has_cells = opts.header.is_some() || opts.footer.is_some();
+    let before_cells = if opts.number && !has_cells {
         let numbered = work.path().join("numbered.pdf");
         wkhtmltox_pdf_sys::stamp_footer(&after_outline, &numbered, "[page] / [topage]", 1)
             .map_err(WkError::Pdf)?;
         numbered
     } else {
         after_outline
+    };
+
+    // Optionally stamp variable header/footer cells.
+    let final_path = if has_cells {
+        let stamped = work.path().join("cells.pdf");
+        let cell_strings = build_cell_strings(opts, &outline_items, offset);
+        wkhtmltox_pdf_sys::stamp_cells(
+            &before_cells,
+            &stamped,
+            &cell_strings,
+            offset,
+            opts.header_footer_font_size,
+        )
+        .map_err(WkError::Pdf)?;
+        stamped
+    } else {
+        before_cells
     };
 
     // Copy result to the caller-supplied destination before `work` is dropped.
@@ -120,14 +189,14 @@ pub fn assemble_pdf(
 
 /// Inner implementation of the TOC + fixed-point loop path.
 ///
-/// Called only when `with_toc = true`; separated so the `TempDir` borrow in
+/// Called only when `opts.with_toc = true`; separated so the `TempDir` borrow in
 /// the caller stays in scope across the copy.
 fn assemble_with_toc(
     r: &mut dyn Renderer,
     objects: &[Source],
     geom: &PageGeometry,
     out: &Path,
-    number: bool,
+    opts: &AssembleOpts,
     work: &Path,
 ) -> Result<AssemblyReport> {
     // ── Phase 1: render all content objects ───────────────────────────────────
@@ -257,7 +326,9 @@ fn assemble_with_toc(
         merged
     };
 
-    let final_path = if number {
+    // Optionally stamp simple page-number footers (legacy path).
+    let has_cells = opts.header.is_some() || opts.footer.is_some();
+    let before_cells = if opts.number && !has_cells {
         let numbered = work.join("numbered.pdf");
         wkhtmltox_pdf_sys::stamp_footer(&after_outline, &numbered, "[page] / [topage]", 1)
             .map_err(WkError::Pdf)?;
@@ -266,10 +337,91 @@ fn assemble_with_toc(
         after_outline
     };
 
+    // Optionally stamp variable header/footer cells.
+    let final_path = if has_cells {
+        let stamped = work.join("cells.pdf");
+        let cell_strings = build_cell_strings(opts, &all_outline, total_pages);
+        wkhtmltox_pdf_sys::stamp_cells(
+            &before_cells,
+            &stamped,
+            &cell_strings,
+            total_pages,
+            opts.header_footer_font_size,
+        )
+        .map_err(WkError::Pdf)?;
+        stamped
+    } else {
+        before_cells
+    };
+
     std::fs::copy(&final_path, out).map_err(|e| WkError::Io(e.to_string()))?;
 
     Ok(AssemblyReport {
         pages: total_pages,
         objects: objects.len(),
     })
+}
+
+/// Build the flat `cells` array consumed by [`wkhtmltox_pdf_sys::stamp_cells`].
+///
+/// Returns a `Vec<String>` of length `total_pages * 6`.  For each 0-based page
+/// `p` the six entries at `p*6+0..5` are:
+/// `[top-left, top-center, top-right, bottom-left, bottom-center, bottom-right]`.
+///
+/// Token substitution is performed here in Rust; the shim is a dumb stamper.
+fn build_cell_strings(
+    opts: &AssembleOpts,
+    outline_items: &[(String, u32, u8)],
+    total_pages: u32,
+) -> Vec<String> {
+    let (date, time) = crate::headerfooter::now_date_time();
+    let mut cells: Vec<String> = Vec::with_capacity(total_pages as usize * 6);
+
+    for page_0based in 0..total_pages {
+        let page_1based = page_0based + 1;
+        let (section, subsection) =
+            crate::headerfooter::active_section_subsection(outline_items, page_0based);
+
+        let ctx = crate::headerfooter::PageCtx {
+            page: page_1based,
+            topage: total_pages,
+            frompage: 1,
+            section,
+            subsection,
+            title: opts.doc_title.clone(),
+            date: date.clone(),
+            time: time.clone(),
+        };
+
+        // Header row: top-left, top-center, top-right
+        let (hl, hc, hr) = if let Some(h) = &opts.header {
+            (
+                crate::headerfooter::substitute(&h.left, &ctx),
+                crate::headerfooter::substitute(&h.center, &ctx),
+                crate::headerfooter::substitute(&h.right, &ctx),
+            )
+        } else {
+            (String::new(), String::new(), String::new())
+        };
+
+        // Footer row: bottom-left, bottom-center, bottom-right
+        let (fl, fc, fr) = if let Some(f) = &opts.footer {
+            (
+                crate::headerfooter::substitute(&f.left, &ctx),
+                crate::headerfooter::substitute(&f.center, &ctx),
+                crate::headerfooter::substitute(&f.right, &ctx),
+            )
+        } else {
+            (String::new(), String::new(), String::new())
+        };
+
+        cells.push(hl);
+        cells.push(hc);
+        cells.push(hr);
+        cells.push(fl);
+        cells.push(fc);
+        cells.push(fr);
+    }
+
+    cells
 }

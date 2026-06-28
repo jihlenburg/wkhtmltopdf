@@ -3,6 +3,7 @@
 pub mod assembly;
 pub mod compat;
 pub mod error;
+pub mod headerfooter;
 pub mod outline;
 pub mod pdfread;
 pub mod render;

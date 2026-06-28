@@ -4,7 +4,7 @@
 // MockRenderer so no browser is required.
 
 use wkhtmltox_core::{
-    assembly::assemble_pdf,
+    assembly::{assemble_pdf, AssembleOpts},
     render::{PageGeometry, Source},
     testing::MockRenderer,
 };
@@ -105,8 +105,7 @@ fn toc_with_mock_converges_and_offsets_bookmarks() {
         &[Source::Html("<h2>H</h2><p>content</p>".into())],
         &PageGeometry::default(),
         &out,
-        false, // no page-number footer
-        true,  // with TOC
+        &AssembleOpts { with_toc: true, ..Default::default() },
     )
     .expect("assemble_pdf with TOC should succeed");
 

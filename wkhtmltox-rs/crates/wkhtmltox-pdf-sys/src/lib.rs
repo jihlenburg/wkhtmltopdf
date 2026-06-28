@@ -26,6 +26,13 @@ extern "C" {
         start: c_int,
     ) -> c_int;
     fn wkx_pdf_page_count(in_path: *const c_char) -> c_int;
+    fn wkx_pdf_stamp_cells(
+        in_path: *const c_char,
+        out_path: *const c_char,
+        cells: *const *const c_char,
+        n_pages: c_int,
+        font_size: f64,
+    ) -> c_int;
 }
 
 /// Safe wrapper: build a nested PDF `/Outlines` (bookmarks) tree on a copy of `in_path`
@@ -99,6 +106,53 @@ pub fn page_count(p: &Path) -> Result<u32, String> {
         Err(format!("wkx_pdf_page_count rc={rc}"))
     } else {
         Ok(rc as u32)
+    }
+}
+
+/// Safe wrapper: stamp pre-substituted header/footer text cells on every page.
+///
+/// `cells` must have exactly `n_pages * 6` entries (panics otherwise).  For
+/// page `p` (0-based) the six entries at `p*6 + 0..5` are:
+/// `[top-left, top-center, top-right, bottom-left, bottom-center, bottom-right]`.
+/// An empty string skips that cell.
+///
+/// `font_size`: Helvetica point size used for all non-empty cells.
+pub fn stamp_cells(
+    in_path: &Path,
+    out_path: &Path,
+    cells: &[String],
+    n_pages: u32,
+    font_size: f64,
+) -> Result<(), String> {
+    if cells.len() != n_pages as usize * 6 {
+        return Err(format!(
+            "stamp_cells: cells.len()={} != n_pages*6={}",
+            cells.len(),
+            n_pages as usize * 6
+        ));
+    }
+    let ci = CString::new(in_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let co = CString::new(out_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+
+    let cstrings: Vec<CString> = cells
+        .iter()
+        .map(|s| CString::new(s.as_bytes()).map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+    let ptrs: Vec<*const c_char> = cstrings.iter().map(|c| c.as_ptr()).collect();
+
+    let rc = unsafe {
+        wkx_pdf_stamp_cells(
+            ci.as_ptr(),
+            co.as_ptr(),
+            ptrs.as_ptr(),
+            n_pages as c_int,
+            font_size,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(format!("wkx_pdf_stamp_cells rc={rc}"))
     }
 }
 

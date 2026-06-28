@@ -12,6 +12,68 @@
 #include <qpdf/QPDFFormFieldObjectHelper.hh>
 #include <qpdf/QPDFAnnotationObjectHelper.hh>
 
+namespace {
+
+// ── Inheritance-aware resource helper ────────────────────────────────────────
+//
+// Walk the page-tree upward to find the nearest /Resources dict (which may
+// be on the page itself or inherited from a parent /Pages node).  A
+// shallow copy is placed on the page dict so subsequent modifications
+// (adding /WKXF) stay local and do not clobber a shared parent resource
+// dict.  This addresses the M2a deferred finding.
+//
+// After ensuring a local /Resources, the function also ensures a local
+// /Font sub-dict (again, shallow-copying if the existing one is indirect)
+// and returns it ready for mutation.
+
+static QPDFObjectHandle ensure_page_font_dict(QPDFObjectHandle page) {
+    // Step 1: ensure the page has its own /Resources.
+    if (!page.hasKey("/Resources")) {
+        QPDFObjectHandle cur = page;
+        bool found = false;
+        while (cur.hasKey("/Parent")) {
+            cur = cur.getKey("/Parent");
+            if (cur.hasKey("/Resources")) {
+                // Shallow-copy so we don't modify the parent's shared dict.
+                page.replaceKey("/Resources",
+                                cur.getKey("/Resources").shallowCopy());
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            page.replaceKey("/Resources", QPDFObjectHandle::newDictionary());
+    }
+    QPDFObjectHandle res = page.getKey("/Resources");
+
+    // Step 2: ensure /Font is a local writable dict.
+    if (!res.hasKey("/Font")) {
+        res.replaceKey("/Font", QPDFObjectHandle::newDictionary());
+    } else {
+        QPDFObjectHandle fd = res.getKey("/Font");
+        if (fd.isIndirect()) {
+            // Shallow-copy so adding /WKXF doesn't pollute a shared parent
+            // font dict.
+            res.replaceKey("/Font", fd.shallowCopy());
+        }
+    }
+    return res.getKey("/Font");
+}
+
+// ── Add /WKXF (Helvetica) to the page if not already present ─────────────────
+static void add_wkxf_font(QPDFObjectHandle page) {
+    QPDFObjectHandle font_dict = ensure_page_font_dict(page);
+    if (!font_dict.hasKey("/WKXF")) {
+        QPDFObjectHandle font = QPDFObjectHandle::newDictionary();
+        font.replaceKey("/Type",     QPDFObjectHandle::newName("/Font"));
+        font.replaceKey("/Subtype",  QPDFObjectHandle::newName("/Type1"));
+        font.replaceKey("/BaseFont", QPDFObjectHandle::newName("/Helvetica"));
+        font_dict.replaceKey("/WKXF", font);
+    }
+}
+
+} // namespace
+
 extern "C" int wkx_pdf_roundtrip(const char* in_path, const char* out_path) {
     try {
         QPDF q;
@@ -300,20 +362,8 @@ extern "C" int wkx_pdf_stamp_footer(const char* in_path, const char* out_path,
                << escaped << ") Tj ET Q\n";
             std::string content = ss.str();
 
-            // Ensure /Resources and /Font exist on the page, then add /WKXF.
-            if (!page.hasKey("/Resources"))
-                page.replaceKey("/Resources", QPDFObjectHandle::newDictionary());
-            QPDFObjectHandle res = page.getKey("/Resources");
-            if (!res.hasKey("/Font"))
-                res.replaceKey("/Font", QPDFObjectHandle::newDictionary());
-            QPDFObjectHandle font_dict = res.getKey("/Font");
-            if (!font_dict.hasKey("/WKXF")) {
-                QPDFObjectHandle font = QPDFObjectHandle::newDictionary();
-                font.replaceKey("/Type",     QPDFObjectHandle::newName("/Font"));
-                font.replaceKey("/Subtype",  QPDFObjectHandle::newName("/Type1"));
-                font.replaceKey("/BaseFont", QPDFObjectHandle::newName("/Helvetica"));
-                font_dict.replaceKey("/WKXF", font);
-            }
+            // Add /WKXF Helvetica to page resources (inheritance-aware).
+            add_wkxf_font(page);
 
             // Append the footer content stream after existing page contents.
             QPDFObjectHandle stream = QPDFObjectHandle::newStream(&q, content);
@@ -340,5 +390,118 @@ extern "C" int wkx_pdf_page_count(const char* in_path) {
         return -1;
     } catch (...) {
         return -1; // unknown exception must not unwind across extern "C"
+    }
+}
+
+// Stamp header/footer cells on each page.
+//
+// `cells` must have exactly `n_pages * 6` entries (caller-enforced).
+// For page p (0-based) the six cell strings are at indices p*6+0..5:
+//   0=top-left  1=top-center  2=top-right
+//   3=bot-left  4=bot-center  5=bot-right
+// An empty string means "skip that cell".
+// font_size: Helvetica point size applied to all non-empty cells.
+//
+// Returns 0 on success, 1 on QPDF/std error, 2 if n_pages <= 0.
+extern "C" int wkx_pdf_stamp_cells(const char* in_path, const char* out_path,
+                                    const char** cells, int n_pages,
+                                    double font_size) {
+    try {
+        if (n_pages <= 0) return 2;
+
+        QPDF q;
+        q.processFile(in_path);
+
+        QPDFPageDocumentHelper pdh(q);
+        auto pages = pdh.getAllPages();
+
+        // Clamp to actual page count so callers can pass a conservative n_pages.
+        if ((int)pages.size() < n_pages)
+            n_pages = (int)pages.size();
+
+        for (int pi = 0; pi < n_pages; ++pi) {
+            QPDFObjectHandle page = pages[pi].getObjectHandle();
+
+            // ── Determine page dimensions (MediaBox, possibly inherited) ─────
+            double pw = 595.0, ph = 842.0; // A4 defaults
+            {
+                QPDFObjectHandle cur = page;
+                while (true) {
+                    if (cur.hasKey("/MediaBox")) {
+                        auto mb = cur.getKey("/MediaBox");
+                        if (mb.isArray() && mb.getArrayNItems() >= 4) {
+                            double llx = mb.getArrayItem(0).getNumericValue();
+                            double lly = mb.getArrayItem(1).getNumericValue();
+                            double urx = mb.getArrayItem(2).getNumericValue();
+                            double ury = mb.getArrayItem(3).getNumericValue();
+                            pw = urx - llx;
+                            ph = ury - lly;
+                        }
+                        break;
+                    }
+                    if (!cur.hasKey("/Parent")) break;
+                    cur = cur.getKey("/Parent");
+                }
+            }
+
+            const double margin = 36.0;
+            const double y_top = ph - 28.0;
+            const double y_bottom = 20.0;
+
+            std::string stream_content;
+
+            for (int ci = 0; ci < 6; ++ci) {
+                const char* text_c = cells[pi * 6 + ci];
+                if (!text_c || text_c[0] == '\0') continue;
+
+                std::string text(text_c);
+                double approx_width = (double)text.size() * font_size * 0.5;
+
+                double y = (ci < 3) ? y_top : y_bottom;
+                int col = ci % 3; // 0=left 1=center 2=right
+
+                double x;
+                if (col == 0) {
+                    x = margin;
+                } else if (col == 1) {
+                    x = (pw - approx_width) / 2.0;
+                } else {
+                    x = pw - margin - approx_width;
+                }
+                if (x < 10.0) x = 10.0;
+
+                // Escape PDF string specials: '(' ')' '\'
+                std::string escaped;
+                escaped.reserve(text.size());
+                for (char c : text) {
+                    if (c == '(' || c == ')' || c == '\\') escaped += '\\';
+                    escaped += c;
+                }
+
+                std::ostringstream ss;
+                ss << "q BT /WKXF " << font_size << " Tf "
+                   << x << " " << y << " Td ("
+                   << escaped << ") Tj ET Q\n";
+                stream_content += ss.str();
+            }
+
+            if (stream_content.empty()) continue;
+
+            // Add /WKXF Helvetica (inheritance-aware, no clobber).
+            add_wkxf_font(page);
+
+            // Append the cell content stream after existing page contents.
+            QPDFObjectHandle stream =
+                QPDFObjectHandle::newStream(&q, stream_content);
+            QPDFPageObjectHelper(page).addPageContents(stream, false);
+        }
+
+        QPDFWriter w(q, out_path);
+        w.write();
+        return 0;
+    } catch (const std::exception&) {
+        return 1;
+    } catch (...) {
+        return 2; // unknown exception must not unwind across extern "C"
     }
 }

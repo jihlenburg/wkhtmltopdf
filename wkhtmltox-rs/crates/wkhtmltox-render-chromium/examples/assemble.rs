@@ -9,7 +9,7 @@
 //! Prints an AssemblyReport (pages, objects) to stderr on success.
 
 use std::path::PathBuf;
-use wkhtmltox_core::assembly::assemble_pdf;
+use wkhtmltox_core::assembly::{assemble_pdf, AssembleOpts};
 use wkhtmltox_core::render::{PageGeometry, Source};
 use wkhtmltox_render_chromium::renderer::ChromiumRenderer;
 
@@ -45,7 +45,14 @@ fn main() {
         ..Default::default()
     };
 
-    let report = assemble_pdf(&mut renderer, &objects, &geom, &out, true, false).unwrap_or_else(|e| {
+    let report = assemble_pdf(
+        &mut renderer,
+        &objects,
+        &geom,
+        &out,
+        &AssembleOpts { number: true, ..Default::default() },
+    )
+    .unwrap_or_else(|e| {
         eprintln!("assemble_pdf failed: {e}");
         std::process::exit(1);
     });

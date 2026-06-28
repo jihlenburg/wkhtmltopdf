@@ -3,7 +3,7 @@
 // Integration test for `assemble_pdf` using MockRenderer so no browser is needed.
 
 use wkhtmltox_core::{
-    assembly::assemble_pdf,
+    assembly::{assemble_pdf, AssembleOpts, CellText},
     render::{PageGeometry, Source},
     testing::MockRenderer,
 };
@@ -141,8 +141,7 @@ fn assemble_two_objects_two_pages_each() {
         &[Source::Html("a".into()), Source::Html("b".into())],
         &PageGeometry::default(),
         &out,
-        true,  // stamp page numbers
-        false, // no TOC
+        &AssembleOpts { number: true, ..Default::default() },
     )
     .expect("assemble_pdf should succeed");
 
@@ -279,8 +278,7 @@ fn exact_page_from_engine_outline() {
         &[Source::Html("<h2>Deep</h2><p>content</p>".into())],
         &PageGeometry::default(),
         &out,
-        false, // no footer stamp — keep pipeline minimal
-        false, // no TOC
+        &AssembleOpts::default(),
     )
     .expect("assemble_pdf should succeed");
 
@@ -346,6 +344,70 @@ fn exact_page_from_engine_outline() {
     assert_eq!(
         dest_page_ref, page2_id,
         "\"Deep\" bookmark must point to page 2 (exact engine outline, not object's first page)"
+    );
+
+    let _ = std::fs::remove_file(&out);
+}
+
+/// Verify that `assemble_pdf` with `footer.center = "[page]/[topage]"` stamps
+/// the correct per-page text into the PDF content streams.
+///
+/// Two objects × 2 pages each → 4 total pages.
+/// Page 1 should contain "(1/4)" and page 4 should contain "(4/4)".
+#[test]
+fn assemble_footer_center_page_of_topage() {
+    let out = std::env::temp_dir().join(format!(
+        "wkx_footer_cells_{}.pdf",
+        std::process::id()
+    ));
+
+    let mut mock = MockRenderer::new();
+    mock.pdf = min_pdf_bytes(2);
+    mock.probe = serde_json::json!({ "headings": [] });
+
+    let report = assemble_pdf(
+        &mut mock,
+        &[Source::Html("a".into()), Source::Html("b".into())],
+        &PageGeometry::default(),
+        &out,
+        &AssembleOpts {
+            footer: Some(CellText {
+                left: String::new(),
+                center: "[page]/[topage]".into(),
+                right: String::new(),
+            }),
+            ..Default::default()
+        },
+    )
+    .expect("assemble_pdf with footer cells should succeed");
+
+    assert_eq!(report.pages, 4, "2 objects × 2 pages = 4 total pages");
+    assert_eq!(report.objects, 2);
+
+    let doc = lopdf::Document::load(&out).expect("lopdf must load the output");
+    let pages = doc.get_pages();
+    assert_eq!(pages.len(), 4, "merged PDF must have 4 pages");
+
+    // Page 1 should contain the literal "(1/4)" in its content stream.
+    let page1_id = *pages.get(&1).expect("page 1 must exist");
+    let content1 = doc
+        .get_page_content(page1_id)
+        .expect("page 1 content must be readable");
+    assert!(
+        content1.windows(5).any(|w| w == b"(1/4)"),
+        "page 1 content should contain '(1/4)', got: {:?}",
+        String::from_utf8_lossy(&content1),
+    );
+
+    // Page 4 should contain the literal "(4/4)".
+    let page4_id = *pages.get(&4).expect("page 4 must exist");
+    let content4 = doc
+        .get_page_content(page4_id)
+        .expect("page 4 content must be readable");
+    assert!(
+        content4.windows(5).any(|w| w == b"(4/4)"),
+        "page 4 content should contain '(4/4)', got: {:?}",
+        String::from_utf8_lossy(&content4),
     );
 
     let _ = std::fs::remove_file(&out);
