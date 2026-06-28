@@ -1558,6 +1558,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "wkhtmltox-cli"
+version = "0.0.0"
+dependencies = [
+ "wkhtmltox-core",
+]
+
+[[package]]
 name = "wkhtmltox-core"
 version = "0.0.0"
 dependencies = [
