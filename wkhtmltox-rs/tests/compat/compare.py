@@ -74,6 +74,13 @@ parser.add_argument(
     help="Run M3b CLI comparison: our wkhtmltopdf binary vs oracle "
          "(structural + exit-code checks).",
 )
+parser.add_argument(
+    "--image",
+    action="store_true",
+    default=False,
+    help="Run M5 image comparison: our wkhtmltoimage binary vs oracle "
+         "(dimensions + SSIM on PNG output).",
+)
 ARGS = parser.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -1385,10 +1392,327 @@ def run_cli_comparison():
 
 
 # ---------------------------------------------------------------------------
+# M5 image comparison (--image mode)
+# ---------------------------------------------------------------------------
+
+ORACLE_IMAGE_BIN = Path(
+    os.environ.get(
+        "WKHTMLTOX_IMAGE_ORACLE",
+        "/Users/jihlenburg/.local/wkhtmltox/bin/wkhtmltoimage",
+    )
+)
+
+IMAGE_CORPUS_DOCS = ["text.html", "cssbox.html"]
+IMAGE_WIDTH = 800
+
+
+def render_oracle_image(html_path: Path, out_png: Path) -> tuple[str, str]:
+    """Run oracle wkhtmltoimage and return (status, detail)."""
+    cmd = [
+        str(ORACLE_IMAGE_BIN),
+        "--format", "png",
+        "--width", str(IMAGE_WIDTH),
+        "--enable-local-file-access",
+        "--quiet",
+        str(html_path),
+        str(out_png),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return "ORACLE_CRASH", "timeout after 120s"
+    except Exception as exc:
+        return "ORACLE_CRASH", f"subprocess error: {exc}"
+
+    stderr_tail = result.stderr.strip()[-300:] if result.stderr else ""
+    if result.returncode < 0:
+        import signal as _signal
+        sig = -result.returncode
+        try:
+            sig_name = _signal.Signals(sig).name
+        except ValueError:
+            sig_name = str(sig)
+        return "ORACLE_CRASH", f"killed by SIG{sig_name}; stderr: {stderr_tail}"
+    if result.returncode != 0 or not out_png.exists():
+        return "ORACLE_ERROR", f"rc={result.returncode}; stderr: {stderr_tail}"
+    return "OK", stderr_tail
+
+
+def render_our_image(html_path: Path, out_png: Path) -> tuple[str, str]:
+    """Run our wkhtmltoimage binary and return (status, detail)."""
+    our_bin = WORKSPACE_DIR / "target" / "debug" / "wkhtmltoimage"
+    if not our_bin.exists():
+        return "OUR_ERROR", f"binary not found at {our_bin}; run `cargo build -p wkhtmltoimage-cli` first"
+    cmd = [
+        str(our_bin),
+        "--format", "png",
+        "--width", str(IMAGE_WIDTH),
+        "--enable-local-file-access",
+        "--quiet",
+        str(html_path.resolve()),
+        str(out_png),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return "OUR_CRASH", "timeout after 120s"
+    except Exception as exc:
+        return "OUR_CRASH", f"subprocess error: {exc}"
+
+    combined = (result.stderr + result.stdout).strip()
+    tail = combined[-300:] if combined else ""
+    if result.returncode < 0:
+        import signal as _signal
+        sig = -result.returncode
+        try:
+            sig_name = _signal.Signals(sig).name
+        except ValueError:
+            sig_name = str(sig)
+        return "OUR_CRASH", f"killed by SIG{sig_name}; output: {tail}"
+    if result.returncode != 0 or not out_png.exists():
+        return "OUR_ERROR", f"rc={result.returncode}; output: {tail}"
+    return "OK", tail
+
+
+def png_dimensions(path: Path) -> tuple[int, int]:
+    """Return (width, height) of an image file using PIL."""
+    from PIL import Image
+    with Image.open(str(path)) as img:
+        return img.size  # (width, height)
+
+
+def image_ssim(path_a: Path, path_b: Path) -> float:
+    """
+    Compute SSIM between two images (PIL/numpy/skimage).
+    Both images are loaded, converted to grayscale, resized to a common size
+    (the minimum of the two in each dimension) if they differ, then compared.
+    Returns SSIM in [-1, 1] (1 = identical).
+    """
+    from PIL import Image
+
+    img_a = Image.open(str(path_a)).convert("L")  # grayscale
+    img_b = Image.open(str(path_b)).convert("L")
+
+    wa, ha = img_a.size
+    wb, hb = img_b.size
+
+    if (wa, ha) != (wb, hb):
+        # Resize to minimum common dimensions to avoid distortion artifacts
+        w = min(wa, wb)
+        h = min(ha, hb)
+        img_a = img_a.resize((w, h), Image.LANCZOS)
+        img_b = img_b.resize((w, h), Image.LANCZOS)
+
+    arr_a = np.array(img_a, dtype=np.uint8)
+    arr_b = np.array(img_b, dtype=np.uint8)
+
+    win = min(arr_a.shape[0], arr_a.shape[1], 7)
+    if win < 3:
+        win = 3
+    if win % 2 == 0:
+        win -= 1
+
+    return float(ssim(arr_a, arr_b, data_range=255, win_size=win))
+
+
+def run_image_comparison():
+    """
+    M5 Task 4: compare our wkhtmltoimage vs oracle on corpus docs.
+    Renders PNG (width=800) for each doc via both binaries.
+    Metrics: valid PNG, dimensions (ours vs oracle, delta), SSIM.
+    Writes results-image.md and results-image.json.
+    """
+    corpus_dir = SCRIPT_DIR / "corpus"
+    our_bin = WORKSPACE_DIR / "target" / "debug" / "wkhtmltoimage"
+
+    print(f"Oracle image : {ORACLE_IMAGE_BIN}")
+    print(f"Ours         : {our_bin}")
+    print(f"Corpus       : {corpus_dir}")
+    print(f"Width        : {IMAGE_WIDTH}")
+    print()
+
+    if not ORACLE_IMAGE_BIN.exists():
+        print(f"ERROR: oracle wkhtmltoimage not found at {ORACLE_IMAGE_BIN}", file=sys.stderr)
+        sys.exit(1)
+    if not our_bin.exists():
+        print(
+            f"ERROR: our binary not found at {our_bin}; "
+            "run `cargo build -p wkhtmltoimage-cli` first.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    img_out_dir = SCRIPT_DIR / "out-image"
+    img_out_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+
+    for doc_name in IMAGE_CORPUS_DOCS:
+        html_path = corpus_dir / doc_name
+        if not html_path.exists():
+            print(f"  SKIP: corpus file not found: {html_path}", file=sys.stderr)
+            results.append({"name": doc_name, "status": "SKIP", "error": f"not found: {html_path}"})
+            continue
+
+        stem = html_path.stem
+        oracle_png = img_out_dir / f"{stem}.oracle.png"
+        our_png = img_out_dir / f"{stem}.ours.png"
+
+        print(f"  {doc_name} ...", flush=True)
+
+        # Oracle render
+        oracle_status, oracle_detail = render_oracle_image(html_path, oracle_png)
+        if oracle_status != "OK":
+            print(f"    ORACLE FAILED: {oracle_status}: {oracle_detail[:200]}")
+            results.append({"name": stem, "status": oracle_status, "error": oracle_detail[:300]})
+            continue
+        print(f"    oracle -> {oracle_png.name}", end="")
+
+        # Our render
+        our_status, our_detail = render_our_image(html_path, our_png)
+        if our_status != "OK":
+            print()
+            print(f"    OUR BINARY FAILED: {our_status}: {our_detail[:200]}")
+            results.append({"name": stem, "status": our_status, "error": our_detail[:300]})
+            continue
+        print(f"  ours -> {our_png.name}")
+
+        # Both PNGs exist — measure dimensions and SSIM
+        try:
+            oracle_w, oracle_h = png_dimensions(oracle_png)
+            our_w, our_h = png_dimensions(our_png)
+            delta_w = our_w - oracle_w
+            delta_h = our_h - oracle_h
+        except Exception as exc:
+            results.append({"name": stem, "status": "METRICS_ERROR", "error": f"dimensions: {exc}"})
+            continue
+
+        try:
+            img_ssim = image_ssim(oracle_png, our_png)
+        except Exception as exc:
+            results.append({"name": stem, "status": "METRICS_ERROR", "error": f"SSIM: {exc}"})
+            continue
+
+        print(
+            f"    oracle {oracle_w}x{oracle_h}  ours {our_w}x{our_h}  "
+            f"Δw={delta_w:+d} Δh={delta_h:+d}  SSIM={img_ssim:.4f}"
+        )
+
+        results.append({
+            "name": stem,
+            "status": "OK",
+            "oracle_w": oracle_w,
+            "oracle_h": oracle_h,
+            "our_w": our_w,
+            "our_h": our_h,
+            "delta_w": delta_w,
+            "delta_h": delta_h,
+            "ssim": round(img_ssim, 4),
+        })
+
+    # ── Build report ──────────────────────────────────────────────────────────
+
+    ok_results = [r for r in results if r.get("status") == "OK"]
+    mean_ssim = round(float(np.mean([r["ssim"] for r in ok_results])), 4) if ok_results else None
+    min_ssim = round(float(np.min([r["ssim"] for r in ok_results])), 4) if ok_results else None
+
+    print()
+    print(f"Summary: {len(ok_results)}/{len(results)} OK  mean_ssim={mean_ssim}  min_ssim={min_ssim}")
+
+    # ── Write results-image.md ─────────────────────────────────────────────────
+
+    def img_row(r):
+        if r.get("status") != "OK":
+            return (
+                f"| {r['name']:<20} | {r['status']:<12} | --- | --- | --- | --- | --- | --- | --- |"
+            )
+        return (
+            f"| {r['name']:<20} | {'OK':<12} "
+            f"| {r['oracle_w']:>5} | {r['oracle_h']:>6} "
+            f"| {r['our_w']:>5} | {r['our_h']:>6} "
+            f"| {r['delta_w']:>+4} | {r['delta_h']:>+5} "
+            f"| {r['ssim']:.4f} |"
+        )
+
+    table_header = (
+        "| Document             | status       | o_w   | o_h    | u_w   | u_h    |  Δw  |   Δh  |   SSIM |"
+    )
+    table_sep = (
+        "|:---------------------|:-------------|------:|-------:|------:|-------:|-----:|------:|-------:|"
+    )
+    table_rows = "\n".join([table_header, table_sep] + [img_row(r) for r in results])
+
+    agg_note = (
+        f"**Aggregate ({len(ok_results)} OK / {len(results) - len(ok_results)} errors)**: "
+        f"mean_ssim={mean_ssim}  min_ssim={min_ssim}"
+    )
+
+    md_content = textwrap.dedent(f"""\
+        # M5 Image Comparison: wkhtmltoimage (ours) vs oracle 0.12.6
+
+        Oracle: `{ORACLE_IMAGE_BIN}`
+        Ours:   `{our_bin}`
+        Corpus: {', '.join(IMAGE_CORPUS_DOCS)}
+        Width:  {IMAGE_WIDTH}px
+        Format: PNG
+
+        ## Results
+
+        {table_rows}
+
+        {agg_note}
+
+        ## Legend
+
+        - **o_w / o_h**: oracle image width / height in pixels
+        - **u_w / u_h**: our image width / height in pixels
+        - **Δw / Δh**: our − oracle dimension delta
+        - **SSIM**: structural similarity (grayscale; images resized to common dims if they differ; 1 = identical)
+
+        ## Notes
+
+        - Both binaries called with `--format png --width {IMAGE_WIDTH} --enable-local-file-access`.
+        - SSIM measured on a single image (no pagination), so it is directly comparable between docs.
+        - Images are resized to the smaller of the two sizes (LANCZOS) before SSIM if dimensions differ.
+        - For reference, PDF page SSIM from previous milestones ranged ~0.55–0.75 (cross-engine, different renderer).
+        - Here both pipelines render the same HTML; SSIM reflects font/layout drift between Qt-WebKit and Chrome.
+    """)
+
+    md_path = SCRIPT_DIR / "results-image.md"
+    md_path.write_text(md_content, encoding="utf-8")
+    print(f"Wrote {md_path}")
+
+    # ── Write results-image.json ───────────────────────────────────────────────
+
+    summary = {
+        "mode": "image",
+        "oracle": str(ORACLE_IMAGE_BIN),
+        "our_bin": str(our_bin),
+        "corpus_docs": IMAGE_CORPUS_DOCS,
+        "width": IMAGE_WIDTH,
+        "format": "png",
+        "results": results,
+        "aggregate": {
+            "n_ok": len(ok_results),
+            "n_errors": len(results) - len(ok_results),
+            "mean_ssim": mean_ssim,
+            "min_ssim": min_ssim,
+        },
+    }
+    json_path = SCRIPT_DIR / "results-image.json"
+    json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(f"Wrote {json_path}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
+    if ARGS.image:
+        run_image_comparison()
+        return
+
     if ARGS.cli:
         run_cli_comparison()
         return

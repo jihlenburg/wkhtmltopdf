@@ -1,0 +1,44 @@
+{
+  "mode": "image",
+  "oracle": "/Users/jihlenburg/.local/wkhtmltox/bin/wkhtmltoimage",
+  "our_bin": "target/debug/wkhtmltoimage",
+  "corpus_docs": [
+    "text.html",
+    "cssbox.html"
+  ],
+  "width": 800,
+  "format": "png",
+  "results": [
+    {
+      "name": "text",
+      "status": "OK",
+      "oracle_w": 800,
+      "oracle_h": 450,
+      "our_w": 756,
+      "our_h": 481,
+      "delta_w": -44,
+      "delta_h": 31,
+      "ssim": 0.0001,
+      "note": "oracle renders all-black (R=G=B=0, A=255); Qt-WebKit macOS arm64 rendering bug. SSIM meaningless."
+    },
+    {
+      "name": "cssbox",
+      "status": "OK",
+      "oracle_w": 800,
+      "oracle_h": 485,
+      "our_w": 756,
+      "our_h": 469,
+      "delta_w": -44,
+      "delta_h": -16,
+      "ssim": 0.3435
+    }
+  ],
+  "aggregate": {
+    "n_ok": 2,
+    "n_errors": 0,
+    "mean_ssim": 0.1718,
+    "min_ssim": 0.0001,
+    "mean_ssim_excluding_oracle_bug": 0.3435,
+    "note": "text.html oracle has rendering bug (all-black); exclude from fidelity conclusions"
+  }
+}
