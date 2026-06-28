@@ -274,17 +274,19 @@ fn extract_file_path(rest: &str) -> &str {
 ///
 /// Recognised ranges:
 ///
-/// | Range            | Category         |
-/// |-----------------|------------------|
-/// | `127.0.0.0/8`   | IPv4 loopback    |
-/// | `10.0.0.0/8`    | IPv4 private     |
-/// | `172.16.0.0/12` | IPv4 private     |
-/// | `192.168.0.0/16`| IPv4 private     |
-/// | `169.254.0.0/16`| IPv4 link-local  |
-/// | `0.0.0.0`       | IPv4 unspecified |
-/// | `::1`           | IPv6 loopback    |
-/// | `fc00::/7`      | IPv6 unique-local|
-/// | `fe80::/10`     | IPv6 link-local  |
+/// | Range             | Category              |
+/// |------------------|-----------------------|
+/// | `127.0.0.0/8`    | IPv4 loopback         |
+/// | `10.0.0.0/8`     | IPv4 private          |
+/// | `172.16.0.0/12`  | IPv4 private          |
+/// | `192.168.0.0/16` | IPv4 private          |
+/// | `169.254.0.0/16` | IPv4 link-local       |
+/// | `100.64.0.0/10`  | IPv4 CGNAT (RFC 6598) |
+/// | `0.0.0.0/8`      | IPv4 "this network"   |
+/// | `::1`            | IPv6 loopback         |
+/// | `fc00::/7`       | IPv6 unique-local     |
+/// | `fe80::/10`      | IPv6 link-local       |
+/// | `64:ff9b::/96`   | NAT64 (RFC 6146)      |
 ///
 /// `host` may be:
 /// * A bare IPv4 address: `"127.0.0.1"`
@@ -377,12 +379,13 @@ fn parse_ipv4(s: &str) -> Option<[u8; 4]> {
 fn is_private_ipv4(ip: [u8; 4]) -> bool {
     let [a, b, _, _] = ip;
     match a {
-        127 => true,                           // 127.0.0.0/8  loopback
-        10 => true,                            // 10.0.0.0/8   private (RFC 1918)
-        172 if (16..=31).contains(&b) => true, // 172.16.0.0/12 private (RFC 1918)
-        192 if b == 168 => true,               // 192.168.0.0/16 private (RFC 1918)
-        169 if b == 254 => true,               // 169.254.0.0/16 link-local (RFC 3927)
-        0 if ip == [0, 0, 0, 0] => true,       // 0.0.0.0 unspecified
+        127 => true,                            // 127.0.0.0/8  loopback
+        10 => true,                             // 10.0.0.0/8   private (RFC 1918)
+        172 if (16..=31).contains(&b) => true,  // 172.16.0.0/12 private (RFC 1918)
+        192 if b == 168 => true,                // 192.168.0.0/16 private (RFC 1918)
+        169 if b == 254 => true,                // 169.254.0.0/16 link-local (RFC 3927)
+        100 if (64..=127).contains(&b) => true, // 100.64.0.0/10 CGNAT (RFC 6598)
+        0 => true,                              // 0.0.0.0/8 "this network" (RFC 1122)
         _ => false,
     }
 }
@@ -502,6 +505,13 @@ fn is_private_ipv6(ip: [u8; 16]) -> bool {
 
     // ::ffff:0:0/96 — IPv4-mapped (RFC 4291 §2.5.5.2).
     if ip[..10] == [0u8; 10] && ip[10] == 0xFF && ip[11] == 0xFF {
+        return is_private_ipv4([ip[12], ip[13], ip[14], ip[15]]);
+    }
+
+    // 64:ff9b::/96 — NAT64 well-known prefix (RFC 6146); last 32 bits embed an IPv4.
+    if ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xFF && ip[3] == 0x9B
+        && ip[4..12] == [0u8; 8]
+    {
         return is_private_ipv4([ip[12], ip[13], ip[14], ip[15]]);
     }
 
@@ -914,9 +924,42 @@ mod tests {
     }
 
     #[test]
-    fn not_private_0_0_0_1() {
-        // Only 0.0.0.0 exact is blocked, not the rest of 0.0.0.0/8.
-        assert!(!is_private_ip("0.0.0.1"));
+    fn private_0_0_0_1() {
+        // The full 0.0.0.0/8 "this network" range is blocked (RFC 1122).
+        assert!(is_private_ip("0.0.0.1"));
+    }
+
+    // --- CGNAT 100.64.0.0/10 ---
+
+    #[test]
+    fn safe_blocks_cgnat_100_64() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(matches!(p.decide("http://100.64.0.1/", false), Decision::Block(_)));
+        assert!(matches!(p.decide("http://100.127.255.255/", false), Decision::Block(_)));
+        // boundary: 100.63 and 100.128 are public, must stay allowed
+        assert!(matches!(p.decide("http://100.63.0.1/", false), Decision::Allow));
+        assert!(matches!(p.decide("http://100.128.0.1/", false), Decision::Allow));
+    }
+
+    // --- Full 0.0.0.0/8 ---
+
+    #[test]
+    fn safe_blocks_zero_slash_8_non_zero() {
+        let p = ResourcePolicy::safe_profile();
+        assert!(matches!(p.decide("http://0.0.0.1/", false), Decision::Block(_)));
+        assert!(matches!(p.decide("http://0.255.255.255/", false), Decision::Block(_)));
+    }
+
+    // --- NAT64 64:ff9b::/96 ---
+
+    #[test]
+    fn safe_blocks_nat64_embedded_private() {
+        let p = ResourcePolicy::safe_profile();
+        // 64:ff9b::10.0.0.1 embeds RFC1918 10.0.0.1
+        assert!(matches!(p.decide("http://[64:ff9b::10.0.0.1]/", false), Decision::Block(_)));
+        assert!(is_private_ip("[64:ff9b::169.254.169.254]"));
+        // NAT64 embedding a PUBLIC v4 stays allowed (only the embedded addr matters)
+        assert!(!is_private_ip("[64:ff9b::8.8.8.8]"));
     }
 
     // --- Public IPv4 ---
