@@ -1,0 +1,61 @@
+{
+  "mode": "assembly",
+  "inputs": [
+    "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/corpus/text.html",
+    "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/corpus/headings.html"
+  ],
+  "oracle_pdf": "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/out-assembly/assembly.ref.pdf",
+  "new_pdf": "/Users/jihlenburg/src/wkhtmltopdf/wkhtmltox-rs/tests/compat/out-assembly/assembly.new.pdf",
+  "pages_ref": 2,
+  "pages_new": 3,
+  "delta_pages": 1,
+  "pages_within_tolerance": true,
+  "outline_ref_n": 12,
+  "outline_new_n": 12,
+  "titles_ref": [
+    "Sample Document Heading",
+    "Chapter 1: Introduction",
+    "1.1 Background",
+    "1.1.1 Historical Context",
+    "1.1.2 Prior Work",
+    "1.2 Problem Statement",
+    "1.2.1 Scope",
+    "1.2.2 Constraints",
+    "Chapter 2: Methodology",
+    "2.1 Approach",
+    "2.1.1 Algorithm",
+    "2.2 Evaluation"
+  ],
+  "titles_new": [
+    "Sample Document Heading",
+    "Chapter 1: Introduction",
+    "1.1 Background",
+    "1.1.1 Historical Context",
+    "1.1.2 Prior Work",
+    "1.2 Problem Statement",
+    "1.2.1 Scope",
+    "1.2.2 Constraints",
+    "Chapter 2: Methodology",
+    "2.1 Approach",
+    "2.1.1 Algorithm",
+    "2.2 Evaluation"
+  ],
+  "common_titles": [
+    "1.1 Background",
+    "1.1.1 Historical Context",
+    "1.1.2 Prior Work",
+    "1.2 Problem Statement",
+    "1.2.1 Scope",
+    "1.2.2 Constraints",
+    "2.1 Approach",
+    "2.1.1 Algorithm",
+    "2.2 Evaluation",
+    "Chapter 1: Introduction",
+    "Chapter 2: Methodology",
+    "Sample Document Heading"
+  ],
+  "only_in_ref": [],
+  "only_in_new": [],
+  "title_overlap": 1.0,
+  "text_sim": 0.9974
+}

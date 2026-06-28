@@ -54,6 +54,12 @@ parser.add_argument(
     default=False,
     help="Pass --compat to the new-engine render example to enable the WK0126 UA-reset stylesheet.",
 )
+parser.add_argument(
+    "--assemble",
+    action="store_true",
+    default=False,
+    help="Run the 2-document assembly comparison (text.html + headings.html) instead of the corpus sweep.",
+)
 ARGS = parser.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -403,10 +409,274 @@ def aggregate(results: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Assembly comparison (--assemble mode)
+# ---------------------------------------------------------------------------
+
+def run_oracle_assemble(html_paths: list, out_pdf: Path) -> tuple[str, str]:
+    """
+    Run wkhtmltopdf with multiple inputs and return (status, detail).
+    Merges all inputs into one PDF using native multi-input support.
+    """
+    cmd = [
+        str(ORACLE_BIN),
+        "-s", "A4",
+        "-T", "10mm", "-B", "10mm", "-L", "10mm", "-R", "10mm",
+        "--dpi", "96",
+        "--enable-local-file-access",
+        "--outline",
+        "--quiet",
+    ]
+    for p in html_paths:
+        cmd.append(str(p))
+    cmd.append(str(out_pdf))
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return "ORACLE_CRASH", "timeout after 180s"
+    except Exception as exc:
+        return "ORACLE_CRASH", f"subprocess error: {exc}"
+
+    stderr_tail = result.stderr.strip()[-300:] if result.stderr else ""
+    if result.returncode < 0:
+        import signal as _signal
+        sig = -result.returncode
+        try:
+            sig_name = _signal.Signals(sig).name
+        except ValueError:
+            sig_name = str(sig)
+        return "ORACLE_CRASH", f"killed by SIG{sig_name}; stderr: {stderr_tail}"
+    if result.returncode != 0 or not out_pdf.exists():
+        return "ORACLE_ERROR", f"rc={result.returncode}; stderr: {stderr_tail}"
+    return "OK", stderr_tail
+
+
+def run_new_assemble(html_paths: list, out_pdf: Path) -> tuple[str, str]:
+    """
+    Run the assemble example (ChromiumRenderer + assemble_pdf) and return (status, detail).
+    """
+    resolved = [str(Path(p).resolve()) for p in html_paths]
+    cmd = [
+        "cargo", "run", "-q",
+        "--example", "assemble",
+        "-p", "wkhtmltox-render-chromium",
+        "--",
+        str(out_pdf),
+        *resolved,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300,
+            cwd=str(WORKSPACE_DIR)
+        )
+    except subprocess.TimeoutExpired:
+        return "NEW_CRASH", "timeout after 300s"
+    except Exception as exc:
+        return "NEW_CRASH", f"subprocess error: {exc}"
+
+    combined = (result.stderr + result.stdout).strip()
+    tail = combined[-500:] if combined else ""
+
+    if result.returncode < 0:
+        import signal as _signal
+        sig = -result.returncode
+        try:
+            sig_name = _signal.Signals(sig).name
+        except ValueError:
+            sig_name = str(sig)
+        return "NEW_CRASH", f"killed by SIG{sig_name}; output: {tail}"
+    if result.returncode != 0 or not out_pdf.exists():
+        return "NEW_ERROR", f"rc={result.returncode}; output: {tail}"
+    return "OK", tail
+
+
+def extract_outline_titles(toc: list) -> list[str]:
+    """Return just the title strings from a PyMuPDF TOC list."""
+    return [title.strip() for _lvl, title, _page in toc]
+
+
+def run_assembly_comparison():
+    """
+    Compare 2-document assembly: corpus/text.html + corpus/headings.html.
+    Oracle uses native multi-input; new engine uses the assemble example.
+    Compares: page count (±1 tolerance), outline entry count, outline titles (structural).
+    Writes results-assembly.md and results-assembly.json.
+    """
+    corpus_dir = SCRIPT_DIR / "corpus"
+    doc1 = corpus_dir / "text.html"
+    doc2 = corpus_dir / "headings.html"
+
+    for p in (doc1, doc2):
+        if not p.exists():
+            print(f"ERROR: corpus file not found: {p}", file=sys.stderr)
+            sys.exit(1)
+
+    asm_out_dir = SCRIPT_DIR / "out-assembly"
+    asm_out_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_pdf = asm_out_dir / "assembly.ref.pdf"
+    new_pdf = asm_out_dir / "assembly.new.pdf"
+
+    print(f"Oracle  : {ORACLE_BIN}")
+    print(f"Inputs  : {doc1.name} + {doc2.name}")
+    print(f"Out dir : {asm_out_dir}")
+    print()
+
+    # --- oracle ---
+    print("Running oracle assembly ...", flush=True)
+    oracle_status, oracle_detail = run_oracle_assemble([doc1, doc2], ref_pdf)
+    if oracle_status != "OK":
+        print(f"  ORACLE FAILED: {oracle_status}: {oracle_detail[:300]}", file=sys.stderr)
+        sys.exit(1)
+    print(f"  oracle OK -> {ref_pdf}")
+
+    # --- new engine ---
+    print("Running new-engine assembly (cargo run --example assemble) ...", flush=True)
+    new_status, new_detail = run_new_assemble([doc1, doc2], new_pdf)
+    if new_status != "OK":
+        print(f"  NEW ENGINE FAILED: {new_status}: {new_detail[:300]}", file=sys.stderr)
+        sys.exit(1)
+    print(f"  new engine OK -> {new_pdf}")
+    print(f"  detail: {new_detail[-200:]}")
+
+    # --- open with pymupdf ---
+    ref_doc = fitz.open(str(ref_pdf))
+    new_doc = fitz.open(str(new_pdf))
+
+    pages_ref = ref_doc.page_count
+    pages_new = new_doc.page_count
+    delta_pages = pages_new - pages_ref
+    pages_within_tolerance = abs(delta_pages) <= 1
+
+    toc_ref = ref_doc.get_toc()
+    toc_new = new_doc.get_toc()
+    titles_ref = extract_outline_titles(toc_ref)
+    titles_new = extract_outline_titles(toc_new)
+
+    outline_ref_n = len(toc_ref)
+    outline_new_n = len(toc_new)
+
+    # Structural title match: intersection over max (ignoring page numbers)
+    set_ref = set(titles_ref)
+    set_new = set(titles_new)
+    common_titles = set_ref & set_new
+    denom = max(len(set_ref), len(set_new), 1)
+    title_overlap = len(common_titles) / denom
+
+    # Text similarity across full merged docs
+    text_ref = extract_text(ref_doc)
+    text_new = extract_text(new_doc)
+    text_sim = text_similarity(text_ref, text_new)
+
+    ref_doc.close()
+    new_doc.close()
+
+    print()
+    print(f"  Page count  : oracle={pages_ref}  new={pages_new}  Δ={delta_pages:+d}  within_±1={pages_within_tolerance}")
+    print(f"  Outline     : oracle entries={outline_ref_n}  new entries={outline_new_n}")
+    print(f"  Titles ref  : {titles_ref}")
+    print(f"  Titles new  : {titles_new}")
+    print(f"  Title overlap (intersection/max): {title_overlap:.3f}  ({len(common_titles)}/{denom})")
+    print(f"  Titles only in oracle : {sorted(set_ref - set_new)}")
+    print(f"  Titles only in new    : {sorted(set_new - set_ref)}")
+    print(f"  Text similarity       : {text_sim:.4f}")
+
+    # Build result dict
+    result = {
+        "mode": "assembly",
+        "inputs": [str(doc1), str(doc2)],
+        "oracle_pdf": str(ref_pdf),
+        "new_pdf": str(new_pdf),
+        "pages_ref": pages_ref,
+        "pages_new": pages_new,
+        "delta_pages": delta_pages,
+        "pages_within_tolerance": pages_within_tolerance,
+        "outline_ref_n": outline_ref_n,
+        "outline_new_n": outline_new_n,
+        "titles_ref": titles_ref,
+        "titles_new": titles_new,
+        "common_titles": sorted(common_titles),
+        "only_in_ref": sorted(set_ref - set_new),
+        "only_in_new": sorted(set_new - set_ref),
+        "title_overlap": round(title_overlap, 4),
+        "text_sim": round(text_sim, 4),
+    }
+
+    # --- write results-assembly.md ---
+    md_path = SCRIPT_DIR / "results-assembly.md"
+    titles_ref_str = "\n".join(f"  - {t}" for t in titles_ref) if titles_ref else "  (none)"
+    titles_new_str = "\n".join(f"  - {t}" for t in titles_new) if titles_new else "  (none)"
+    only_ref_str = "\n".join(f"  - {t}" for t in sorted(set_ref - set_new)) if (set_ref - set_new) else "  (none)"
+    only_new_str = "\n".join(f"  - {t}" for t in sorted(set_new - set_ref)) if (set_new - set_ref) else "  (none)"
+    md_content = textwrap.dedent(f"""\
+        # Assembly Comparison: wkhtmltopdf 0.12.6 vs wkhtmltox-render-chromium
+
+        Oracle: `{ORACLE_BIN}`
+        Inputs: `{doc1.name}` + `{doc2.name}`
+        New engine: `cargo run --example assemble -p wkhtmltox-render-chromium`
+
+        ## Page Count
+
+        | Side    | Pages |
+        |:--------|------:|
+        | Oracle  | {pages_ref} |
+        | New     | {pages_new} |
+        | Δ       | {delta_pages:+d} |
+        | Within ±1 tolerance | {'Yes' if pages_within_tolerance else 'No'} |
+
+        ## Outline (Bookmark) Comparison
+
+        | Metric                      | Value |
+        |:----------------------------|------:|
+        | Oracle outline entries      | {outline_ref_n} |
+        | New engine outline entries  | {outline_new_n} |
+        | Title overlap (intersection/max) | {title_overlap:.3f} ({len(common_titles)}/{denom}) |
+
+        ### Oracle bookmark titles
+{titles_ref_str}
+
+        ### New-engine bookmark titles
+{titles_new_str}
+
+        ### Titles only in oracle
+{only_ref_str}
+
+        ### Titles only in new engine
+{only_new_str}
+
+        ## Text Similarity
+
+        | Metric     | Value  |
+        |:-----------|-------:|
+        | text_sim   | {text_sim:.4f} |
+
+        ## Notes
+
+        - Outline page numbers are NOT compared (M2a: headings point to object-first-page only;
+          per-heading exact destinations deferred to Milestone 2b).
+        - Page count tolerance ±1 accepted because Chrome and wkhtmltopdf paginate
+          identically-sized content with minor differences.
+        - Title overlap is the structural fidelity signal: are the same section titles
+          present in both outlines?
+    """)
+    md_path.write_text(md_content, encoding="utf-8")
+    print(f"\nWrote {md_path}")
+
+    # --- write results-assembly.json ---
+    json_path = SCRIPT_DIR / "results-assembly.json"
+    json_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(f"Wrote {json_path}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
+    if ARGS.assemble:
+        run_assembly_comparison()
+        return
+
     print(f"Oracle  : {ORACLE_BIN}")
     print(f"Corpus  : {CORPUS_DIR} ({len(CORPUS_FILES)} files)")
     print(f"Out dir : {OUT_DIR}")
