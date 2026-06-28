@@ -6,6 +6,7 @@ pub mod error;
 pub mod headerfooter;
 pub mod outline;
 pub mod pdfread;
+pub mod policy;
 pub mod registry;
 pub mod render;
 pub mod settings;
