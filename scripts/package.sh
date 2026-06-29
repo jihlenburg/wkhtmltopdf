@@ -20,7 +20,10 @@ OS="$(uname -s)"; ARCH="$(uname -m)"
 case "$OS/$ARCH" in
   Linux/x86_64)        PLAT="linux-x86_64";  CFT_PLAT="linux64";   DYLIB="so"  ;;
   Linux/aarch64|Linux/arm64)
-                       PLAT="linux-arm64";   CFT_PLAT="";          DYLIB="so"  ;;  # no CFT chrome-headless-shell for arm64 Linux
+                       PLAT="linux-arm64";   CFT_PLAT="";          DYLIB="so"  ;;  # Chrome-for-Testing has no linux-arm64 chrome-headless-shell yet.
+                       # ^ When CFT ships it (consumer Chrome arm64 Linux GA'd Q2 2026; Testing channel typically follows),
+                       #   set CFT_PLAT="linux-arm64" above to bundle the engine like the other platforms. Until then this
+                       #   arch ships without a bundled engine and uses system Chrome (find_chrome probes /usr/bin/google-chrome).
   Darwin/arm64)        PLAT="macos-arm64";   CFT_PLAT="mac-arm64"; DYLIB="dylib" ;;
   Darwin/x86_64)       PLAT="macos-x86_64";  CFT_PLAT="mac-x64";   DYLIB="dylib" ;;
   *) echo "package.sh: unsupported platform $OS/$ARCH (supported: Linux x86_64/arm64, macOS arm64/x86_64)" >&2; exit 2 ;;

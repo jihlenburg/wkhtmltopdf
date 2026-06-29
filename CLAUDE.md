@@ -35,7 +35,7 @@ Each milestone: **plan** (writing-plans → `docs/superpowers/plans/`) → **SDD
 
 ## Platforms
 Supported: **Linux x86_64**, **Linux arm64**, **macOS arm64** (Windows is post-v1). The renderer finds Chrome in this order: `WKHTMLTOX_CHROME` → a `chrome-headless-shell` bundled next to the executable → system Chrome (`/usr/bin/google-chrome`, `/usr/bin/chromium`, …).
-- **arm64 Linux caveat:** Chrome for Testing publishes **no** `linux-arm64` `chrome-headless-shell`, so the arm64 Linux package does **not** bundle the engine — install system **chromium** (auto-discovered) or set `WKHTMLTOX_CHROME`. x86_64 Linux + macOS bundle the engine normally (`scripts/package.sh`).
+- **arm64 Linux caveat:** Chrome for Testing publishes **no** `linux-arm64` `chrome-headless-shell` (verified against the live CFT manifest), so the arm64 Linux package does **not** bundle the engine. Use a system browser: **official Google Chrome for arm64 Linux** (GA'd Q2 2026, `chrome.com/download`) is preferred and is auto-discovered at `/usr/bin/google-chrome`; distro `chromium` also works; or set `WKHTMLTOX_CHROME`. x86_64 Linux + macOS bundle the engine normally (`scripts/package.sh`). **Future one-liner:** once CFT ships `linux-arm64` (consumer Chrome arm64 GA is the leading indicator), set `CFT_PLAT="linux-arm64"` in `scripts/package.sh` to bundle on this arch too.
 
 ## CI / release
 - `.github/workflows/ci.yml` — on push/PR: a `lint + test` matrix (Linux x86_64, Linux arm64, macOS arm64) + a Linux compat-gate vs the 0.12.6 oracle.
