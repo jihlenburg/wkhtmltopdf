@@ -18,11 +18,21 @@ CHROME_VERSION="${CHROME_VERSION:-131.0.6778.204}"
 # ── platform detection → (pkg label, chrome-for-testing platform, dylib ext) ──
 OS="$(uname -s)"; ARCH="$(uname -m)"
 case "$OS/$ARCH" in
-  Linux/x86_64)   PLAT="linux-x86_64";  CFT_PLAT="linux64";   DYLIB="so"  ;;
-  Darwin/arm64)   PLAT="macos-arm64";   CFT_PLAT="mac-arm64"; DYLIB="dylib" ;;
-  Darwin/x86_64)  PLAT="macos-x86_64";  CFT_PLAT="mac-x64";   DYLIB="dylib" ;;
-  *) echo "package.sh: unsupported platform $OS/$ARCH (v1 = Linux x86_64, macOS arm64/x86_64)" >&2; exit 2 ;;
+  Linux/x86_64)        PLAT="linux-x86_64";  CFT_PLAT="linux64";   DYLIB="so"  ;;
+  Linux/aarch64|Linux/arm64)
+                       PLAT="linux-arm64";   CFT_PLAT="";          DYLIB="so"  ;;  # no CFT chrome-headless-shell for arm64 Linux
+  Darwin/arm64)        PLAT="macos-arm64";   CFT_PLAT="mac-arm64"; DYLIB="dylib" ;;
+  Darwin/x86_64)       PLAT="macos-x86_64";  CFT_PLAT="mac-x64";   DYLIB="dylib" ;;
+  *) echo "package.sh: unsupported platform $OS/$ARCH (supported: Linux x86_64/arm64, macOS arm64/x86_64)" >&2; exit 2 ;;
 esac
+
+# Chrome for Testing ships no linux-arm64 chrome-headless-shell → can't self-bundle on arm64 Linux.
+if [ -z "$CFT_PLAT" ] && [ "$SKIP_CHROME" -eq 0 ]; then
+  echo "==> note: no bundled chrome-headless-shell for $PLAT (Chrome for Testing has no $OS-$ARCH build);" >&2
+  echo "    the tarball will rely on system chromium / \$WKHTMLTOX_CHROME (see README.txt)." >&2
+  SKIP_CHROME=1
+  NO_CHROME_REASON="arm64 Linux: install system 'chromium' (auto-discovered) or set WKHTMLTOX_CHROME"
+fi
 
 echo "==> building release binaries + libwkhtmltox ($PLAT)"
 ( cd "$WS" && cargo build --release \
@@ -42,18 +52,28 @@ cp "$TARGET/libwkhtmltox.a" "$STAGE/lib/"
 cp "$WS/crates/wkhtmltox-capi/include/pdf.h" "$WS/crates/wkhtmltox-capi/include/image.h" "$STAGE/include/"
 cp "$REPO_ROOT/LICENSE" "$STAGE/"
 
+if [ "$SKIP_CHROME" -eq 0 ]; then
+  CHROME_BIN_LINE="bin/chrome-headless-shell            bundled rendering engine (used automatically)"
+  CHROME_NOTE="The tools find bin/chrome-headless-shell automatically (no system Chrome needed).
+Override with the WKHTMLTOX_CHROME env var to point at a different browser."
+else
+  CHROME_BIN_LINE="(no bundled rendering engine on this platform)"
+  CHROME_NOTE="No rendering engine is bundled${NO_CHROME_REASON:+ — $NO_CHROME_REASON}.
+Install a system Chrome/Chromium (auto-discovered: /usr/bin/google-chrome, /usr/bin/chromium,
+/usr/bin/chromium-browser) or set the WKHTMLTOX_CHROME env var to a browser binary."
+fi
+
 cat > "$STAGE/README.txt" <<EOF
 wkhtmltox-rs $VERSION ($PLAT)
 A no-Qt reimplementation of wkhtmltopdf/wkhtmltoimage driving headless Chromium.
 
 bin/wkhtmltopdf, bin/wkhtmltoimage   command-line tools
-bin/chrome-headless-shell            bundled rendering engine (used automatically)
+$CHROME_BIN_LINE
 lib/libwkhtmltox.$DYLIB, .a          C ABI library
 include/pdf.h, include/image.h       C ABI headers
 LICENSE                              LGPL-3.0-or-later
 
-The tools find bin/chrome-headless-shell automatically (no system Chrome needed).
-Override with the WKHTMLTOX_CHROME env var to point at a different browser.
+$CHROME_NOTE
 EOF
 
 if [ "$SKIP_CHROME" -eq 0 ]; then

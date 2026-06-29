@@ -1,0 +1,13 @@
+{
+  "name": "wkhtmltox-rs",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.12" }
+  },
+  "postCreateCommand": "bash scripts/setup-dev.sh",
+  "remoteEnv": {
+    "WKHTMLTOX_CHROME": "${localEnv:WKHTMLTOX_CHROME}",
+    "WKHTMLTOX_ORACLE": "${localEnv:WKHTMLTOX_ORACLE}"
+  },
+  "//": "Rust version is governed by rust-toolchain.toml (pinned 1.96.0); rustup auto-installs it. Run `bash scripts/setup-dev.sh --full` to add a Chrome engine + the 0.12.6 oracle for gated tests + the compat harness. If your environment uses a plain setup-command instead of devcontainers, point it at scripts/setup-dev.sh."
+}

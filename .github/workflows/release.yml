@@ -10,7 +10,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14]
+        # Linux x86_64 + arm64 + macOS arm64. (arm64 Linux tarball ships without a
+        # bundled chrome-headless-shell — Chrome for Testing has no linux-arm64 build;
+        # it uses system chromium / WKHTMLTOX_CHROME, per package.sh + the tarball README.)
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
