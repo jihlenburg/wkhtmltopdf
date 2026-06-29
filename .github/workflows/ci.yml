@@ -24,7 +24,7 @@ jobs:
       - name: Install qpdf (macOS)
         if: runner.os == 'macOS'
         run: brew install qpdf
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
@@ -67,7 +67,7 @@ jobs:
           sudo apt-get install -y /tmp/wkhtmltox.deb
           echo "WKHTMLTOX_ORACLE=/usr/local/bin/wkhtmltopdf" >> "$GITHUB_ENV"
           echo "WKHTMLTOX_IMAGE_ORACLE=/usr/local/bin/wkhtmltoimage" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.96.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: wkhtmltox-rs

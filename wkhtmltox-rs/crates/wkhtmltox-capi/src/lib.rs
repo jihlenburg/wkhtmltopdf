@@ -606,8 +606,12 @@ pub unsafe extern "C" fn wkhtmltopdf_convert(converter: *mut CConverter) -> c_in
         // per-object settings.  `to_assemble_opts()` only clones global.replacements
         // (never populated from the C ABI for this setting).  Merge all per-object
         // replacements so they are forwarded to the HTML header/footer query.
-        opts.replacements
-            .extend((*converter).objects.iter().flat_map(|(o, _)| o.replacements.iter().cloned()));
+        opts.replacements.extend(
+            (*converter)
+                .objects
+                .iter()
+                .flat_map(|(o, _)| o.replacements.iter().cloned()),
+        );
 
         // Phase 0: Loading pages
         phase_emit(converter, 0);

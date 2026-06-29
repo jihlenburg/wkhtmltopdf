@@ -20,7 +20,7 @@ jobs:
       - name: Install qpdf (macOS)
         if: runner.os == 'macOS'
         run: brew install qpdf
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.96.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: wkhtmltox-rs

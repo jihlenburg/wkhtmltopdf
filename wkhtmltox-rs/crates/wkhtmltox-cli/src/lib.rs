@@ -1474,40 +1474,50 @@ mod tests {
     /// `--disable-dotted-lines` clears use_dotted_lines.
     #[test]
     fn disable_dotted_lines_flag() {
-        let inv = parse(&args(&["--disable-dotted-lines", "p.html", "out.pdf"]))
-            .expect("should parse");
+        let inv =
+            parse(&args(&["--disable-dotted-lines", "p.html", "out.pdf"])).expect("should parse");
         assert!(!inv.global.toc_settings.use_dotted_lines);
     }
 
     /// `--disable-toc-links` clears forward_links.
     #[test]
     fn disable_toc_links_flag() {
-        let inv = parse(&args(&["--disable-toc-links", "p.html", "out.pdf"]))
-            .expect("should parse");
+        let inv =
+            parse(&args(&["--disable-toc-links", "p.html", "out.pdf"])).expect("should parse");
         assert!(!inv.global.toc_settings.forward_links);
     }
 
     /// `--enable-toc-back-links` sets back_links.
     #[test]
     fn enable_toc_back_links_flag() {
-        let inv = parse(&args(&["--enable-toc-back-links", "p.html", "out.pdf"]))
-            .expect("should parse");
+        let inv =
+            parse(&args(&["--enable-toc-back-links", "p.html", "out.pdf"])).expect("should parse");
         assert!(inv.global.toc_settings.back_links);
     }
 
     /// `--toc-text-size-shrink` sets font_scale.
     #[test]
     fn toc_text_size_shrink_flag() {
-        let inv = parse(&args(&["--toc-text-size-shrink", "0.7", "p.html", "out.pdf"]))
-            .expect("should parse");
+        let inv = parse(&args(&[
+            "--toc-text-size-shrink",
+            "0.7",
+            "p.html",
+            "out.pdf",
+        ]))
+        .expect("should parse");
         assert!((inv.global.toc_settings.font_scale - 0.7).abs() < 1e-9);
     }
 
     /// `--toc-level-indentation` sets indentation string.
     #[test]
     fn toc_level_indentation_flag() {
-        let inv = parse(&args(&["--toc-level-indentation", "2em", "p.html", "out.pdf"]))
-            .expect("should parse");
+        let inv = parse(&args(&[
+            "--toc-level-indentation",
+            "2em",
+            "p.html",
+            "out.pdf",
+        ]))
+        .expect("should parse");
         assert_eq!(inv.global.toc_settings.indentation, "2em");
     }
 
@@ -1521,8 +1531,13 @@ mod tests {
     /// `--dump-outline <file>` stores the path.
     #[test]
     fn dump_outline_flag() {
-        let inv = parse(&args(&["p.html", "--dump-outline", "outline.xml", "out.pdf"]))
-            .expect("should parse");
+        let inv = parse(&args(&[
+            "p.html",
+            "--dump-outline",
+            "outline.xml",
+            "out.pdf",
+        ]))
+        .expect("should parse");
         assert_eq!(inv.dump_outline, Some("outline.xml".to_owned()));
     }
 
@@ -1585,10 +1600,14 @@ mod tests {
         );
         // Simulate the fix: build opts then merge per-object replacements.
         let mut opts = inv.global.to_assemble_opts();
-        opts.replacements
-            .extend(inv.objects.iter().flat_map(|(o, _)| o.replacements.iter().cloned()));
+        opts.replacements.extend(
+            inv.objects
+                .iter()
+                .flat_map(|(o, _)| o.replacements.iter().cloned()),
+        );
         assert!(
-            opts.replacements.contains(&("foo".to_owned(), "bar".to_owned())),
+            opts.replacements
+                .contains(&("foo".to_owned(), "bar".to_owned())),
             "AssembleOpts.replacements must contain (\"foo\", \"bar\") after merge; got: {:?}",
             opts.replacements
         );

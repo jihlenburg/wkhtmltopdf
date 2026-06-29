@@ -77,7 +77,6 @@ pub struct AssembleOpts {
     pub toc_settings: crate::tocxsl::TocXslSettings,
 
     // ── HTML header/footer (Task 3 / Milestone 10) ────────────────────────────
-
     /// HTML header URL or bare filesystem path rendered as a running header.
     ///
     /// When `Some`, the HTML is loaded once per content page with per-page
@@ -556,13 +555,14 @@ fn assemble_with_toc(
 
     // Read the user XSL file once before the fixed-point loop so that each
     // iteration reuses the already-read string rather than re-reading from disk.
-    let xsl_content: Option<String> = if let Some(xsl_path) = &opts.toc_xsl {
-        Some(std::fs::read_to_string(xsl_path).map_err(|e| {
-            WkError::Io(format!("cannot read --xsl-style-sheet {xsl_path:?}: {e}"))
-        })?)
-    } else {
-        None
-    };
+    let xsl_content: Option<String> =
+        if let Some(xsl_path) = &opts.toc_xsl {
+            Some(std::fs::read_to_string(xsl_path).map_err(|e| {
+                WkError::Io(format!("cannot read --xsl-style-sheet {xsl_path:?}: {e}"))
+            })?)
+        } else {
+            None
+        };
 
     for _iter in 0..MAX_ITERS {
         // Recompute global (0-based) page offsets for every heading, assuming
@@ -962,8 +962,7 @@ fn render_html_overlays(
 
         // ── Header overlay ────────────────────────────────────────────────────
         if let Some(ref base_url) = header_base_url {
-            let url =
-                crate::headerfooter::header_footer_query(base_url, &ctx, &opts.replacements);
+            let url = crate::headerfooter::header_footer_query(base_url, &ctx, &opts.replacements);
             let ph = r.open(&Source::Url(url), &opts.load)?;
             r.wait_ready(ph, &ReadyPolicy::default())?;
             let bytes = r.print_pdf(ph, &header_geom)?;
@@ -979,8 +978,7 @@ fn render_html_overlays(
 
         // ── Footer overlay ────────────────────────────────────────────────────
         if let Some(ref base_url) = footer_base_url {
-            let url =
-                crate::headerfooter::header_footer_query(base_url, &ctx, &opts.replacements);
+            let url = crate::headerfooter::header_footer_query(base_url, &ctx, &opts.replacements);
             let ph = r.open(&Source::Url(url), &opts.load)?;
             r.wait_ready(ph, &ReadyPolicy::default())?;
             let bytes = r.print_pdf(ph, &footer_geom)?;

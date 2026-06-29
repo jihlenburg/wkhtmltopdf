@@ -316,10 +316,8 @@ pub fn overlay_pages(base: &[u8], specs: &[OverlaySpec]) -> Result<Vec<u8>, Stri
     std::fs::write(&base_path, base).map_err(|e| e.to_string())?;
     let out_path = dir.path().join("out.pdf");
 
-    let base_c =
-        CString::new(base_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
-    let out_c =
-        CString::new(out_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let base_c = CString::new(base_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    let out_c = CString::new(out_path.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
 
     let ov_c: Vec<CString> = specs
         .iter()

@@ -1215,7 +1215,10 @@ mod tests {
         let mut g = GlobalSettings::default();
         set_global(&mut g, "toc.captionText", "Contents").unwrap();
         assert_eq!(g.toc_settings.caption_text, "Contents");
-        assert_eq!(get_global(&g, "toc.captionText"), Some("Contents".to_owned()));
+        assert_eq!(
+            get_global(&g, "toc.captionText"),
+            Some("Contents".to_owned())
+        );
     }
 
     /// `toc.useDottedLines` is stored as bool.
@@ -1300,10 +1303,7 @@ mod tests {
         let mut g = GlobalSettings::default();
         set_global(&mut g, "footer.htmlUrl", "f.html").unwrap();
         assert!(g.warnings.is_empty());
-        assert_eq!(
-            get_global(&g, "footer.htmlUrl"),
-            Some("f.html".to_owned())
-        );
+        assert_eq!(get_global(&g, "footer.htmlUrl"), Some("f.html".to_owned()));
         let opts = g.to_assemble_opts();
         assert_eq!(opts.footer_html, Some("f.html".to_owned()));
     }
@@ -1323,10 +1323,7 @@ mod tests {
         let mut o = PdfObjectSettings::default();
         set_object(&mut o, "replacements", "foo=bar").unwrap();
         assert!(o.warnings.is_empty(), "no warnings expected");
-        assert_eq!(
-            o.replacements,
-            vec![("foo".to_owned(), "bar".to_owned())]
-        );
+        assert_eq!(o.replacements, vec![("foo".to_owned(), "bar".to_owned())]);
         // A second replacement is appended.
         set_object(&mut o, "replacements", "x=y").unwrap();
         assert_eq!(o.replacements.len(), 2);

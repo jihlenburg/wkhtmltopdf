@@ -44,7 +44,11 @@ pub fn transform_toc(r: &mut dyn Renderer, xml: &str, xsl: &str) -> crate::error
     );
     let v = r.eval_json(page, &script)?;
     if v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
-        let html = v.get("html").and_then(|h| h.as_str()).unwrap_or("").to_string();
+        let html = v
+            .get("html")
+            .and_then(|h| h.as_str())
+            .unwrap_or("")
+            .to_string();
         if html.is_empty() {
             return Err(crate::error::WkError::Xslt(
                 "XSLT transform produced empty output".into(),
@@ -179,7 +183,10 @@ pub fn outline_to_xml(entries: &[(String, u32, u8)]) -> String {
                 break;
             }
         }
-        let next_deeper = entries.get(i + 1).map(|(_, _, l)| *l > *level).unwrap_or(false);
+        let next_deeper = entries
+            .get(i + 1)
+            .map(|(_, _, l)| *l > *level)
+            .unwrap_or(false);
         out.push_str(&indent(open_levels.len()));
         out.push_str(&format!(
             "<item title=\"{}\" page=\"{}\"",
@@ -271,7 +278,10 @@ mod tests {
 
     #[test]
     fn xml_escapes_special_chars() {
-        assert_eq!(xml_escape(r#"a & b <c> "d" 'e'"#), "a &amp; b &lt;c&gt; &quot;d&quot; &apos;e&apos;");
+        assert_eq!(
+            xml_escape(r#"a & b <c> "d" 'e'"#),
+            "a &amp; b &lt;c&gt; &quot;d&quot; &apos;e&apos;"
+        );
     }
 
     #[test]
@@ -309,7 +319,10 @@ mod tests {
         // Escaped title must appear inside the synthetic root.
         let root_pos = xml.find("<item title=\"\" page=\"0\">").unwrap();
         let title_pos = xml.find("title=\"A &amp;").unwrap();
-        assert!(title_pos > root_pos, "escaped title must be inside the synthetic root");
+        assert!(
+            title_pos > root_pos,
+            "escaped title must be inside the synthetic root"
+        );
     }
 
     #[test]
@@ -366,13 +379,16 @@ mod tests {
         assert!(xsl.contains("match=\"outline:outline\""));
         assert!(xsl.contains("match=\"outline:item\""));
         assert!(xsl.contains("Table of Contents")); // default caption
-        assert!(xsl.contains("dashed"));            // dotted lines on by default
+        assert!(xsl.contains("dashed")); // dotted lines on by default
         assert!(xsl.contains("padding-left: 1em")); // default indentation
     }
 
     #[test]
     fn default_xsl_omits_dotted_when_disabled() {
-        let s = TocXslSettings { use_dotted_lines: false, ..Default::default() };
+        let s = TocXslSettings {
+            use_dotted_lines: false,
+            ..Default::default()
+        };
         assert!(!default_toc_xsl(&s).contains("dashed"));
     }
 }

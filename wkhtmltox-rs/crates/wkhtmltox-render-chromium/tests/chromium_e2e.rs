@@ -667,7 +667,8 @@ function subst() {
     let header_path = dir.path().join("header.html");
     {
         let mut f = std::fs::File::create(&header_path).expect("create header.html");
-        f.write_all(header_html.as_bytes()).expect("write header.html");
+        f.write_all(header_html.as_bytes())
+            .expect("write header.html");
     }
 
     // Two-page document via forced CSS page break.  Word-only text: no ASCII digits.
@@ -723,7 +724,9 @@ function subst() {
             .and_then(|d| d.get(b"Resources").ok())
             .and_then(|r_obj| {
                 if let Ok(id) = r_obj.as_reference() {
-                    doc.get_object(id).ok().and_then(|o| o.as_dict().ok().cloned())
+                    doc.get_object(id)
+                        .ok()
+                        .and_then(|o| o.as_dict().ok().cloned())
                 } else {
                     r_obj.as_dict().ok().cloned()
                 }
@@ -880,8 +883,7 @@ fn custom_xsl_toc_contains_headings() {
     std::fs::write(&xsl_path, xsl).unwrap();
 
     let mut r = wkhtmltox_render_chromium::renderer::ChromiumRenderer::spawn().unwrap();
-    let html =
-        "<h1>Alpha</h1><p>x</p><h1 style='page-break-before:always'>Beta</h1><p>y</p>";
+    let html = "<h1>Alpha</h1><p>x</p><h1 style='page-break-before:always'>Beta</h1><p>y</p>";
     let out = dir.path().join("out.pdf");
     let opts = AssembleOpts {
         with_toc: true,

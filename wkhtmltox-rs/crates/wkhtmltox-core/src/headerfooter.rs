@@ -77,8 +77,16 @@ fn percent_encode(s: &str) -> String {
                 let hi = b >> 4;
                 let lo = b & 0xF;
                 out.push('%');
-                out.push(char::from_digit(u32::from(hi), 16).unwrap().to_ascii_uppercase());
-                out.push(char::from_digit(u32::from(lo), 16).unwrap().to_ascii_uppercase());
+                out.push(
+                    char::from_digit(u32::from(hi), 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit(u32::from(lo), 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
             }
         }
     }
@@ -396,7 +404,10 @@ mod tests {
 
     #[test]
     fn url_encodes_values_and_appends_replacements() {
-        let ctx = PageCtx { title: "a&b c".into(), ..PageCtx::sample() };
+        let ctx = PageCtx {
+            title: "a&b c".into(),
+            ..PageCtx::sample()
+        };
         let url = header_footer_query("h.html", &ctx, &[("co".into(), "A & B".into())]);
         assert!(url.contains("title=a%26b%20c") || url.contains("title=a%26b+c"));
         assert!(url.contains("co=A%20%26%20B") || url.contains("co=A+%26+B"));

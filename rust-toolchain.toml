@@ -1,5 +1,8 @@
-# Pin the toolchain CI uses. The workspace MSRV floor is 1.74 (Cargo.toml
-# rust-version); CI builds/tests on current stable for up-to-date lints.
+# Pin the toolchain CI uses to a CONCRETE version so `cargo fmt`/`clippy`
+# results are reproducible locally and don't drift with new stable releases
+# (a moving `stable` rustfmt/clippy was breaking CI between milestones).
+# The workspace MSRV floor is 1.74 (Cargo.toml rust-version); this pin is the
+# build/lint toolchain, not the floor. Bump deliberately.
 [toolchain]
-channel = "stable"
+channel = "1.96.0"
 components = ["rustfmt", "clippy"]

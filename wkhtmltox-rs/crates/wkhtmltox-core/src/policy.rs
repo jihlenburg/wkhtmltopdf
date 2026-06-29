@@ -652,9 +652,7 @@ fn is_private_ipv6(ip: [u8; 16]) -> bool {
     }
 
     // 64:ff9b::/96 — NAT64 well-known prefix (RFC 6146); last 32 bits embed an IPv4.
-    if ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xFF && ip[3] == 0x9B
-        && ip[4..12] == [0u8; 8]
-    {
+    if ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xFF && ip[3] == 0x9B && ip[4..12] == [0u8; 8] {
         return is_private_ipv4([ip[12], ip[13], ip[14], ip[15]]);
     }
 
@@ -1077,11 +1075,23 @@ mod tests {
     #[test]
     fn safe_blocks_cgnat_100_64() {
         let p = ResourcePolicy::safe_profile();
-        assert!(matches!(p.decide("http://100.64.0.1/", false), Decision::Block(_)));
-        assert!(matches!(p.decide("http://100.127.255.255/", false), Decision::Block(_)));
+        assert!(matches!(
+            p.decide("http://100.64.0.1/", false),
+            Decision::Block(_)
+        ));
+        assert!(matches!(
+            p.decide("http://100.127.255.255/", false),
+            Decision::Block(_)
+        ));
         // boundary: 100.63 and 100.128 are public, must stay allowed
-        assert!(matches!(p.decide("http://100.63.0.1/", false), Decision::Allow));
-        assert!(matches!(p.decide("http://100.128.0.1/", false), Decision::Allow));
+        assert!(matches!(
+            p.decide("http://100.63.0.1/", false),
+            Decision::Allow
+        ));
+        assert!(matches!(
+            p.decide("http://100.128.0.1/", false),
+            Decision::Allow
+        ));
     }
 
     // --- Full 0.0.0.0/8 ---
@@ -1089,8 +1099,14 @@ mod tests {
     #[test]
     fn safe_blocks_zero_slash_8_non_zero() {
         let p = ResourcePolicy::safe_profile();
-        assert!(matches!(p.decide("http://0.0.0.1/", false), Decision::Block(_)));
-        assert!(matches!(p.decide("http://0.255.255.255/", false), Decision::Block(_)));
+        assert!(matches!(
+            p.decide("http://0.0.0.1/", false),
+            Decision::Block(_)
+        ));
+        assert!(matches!(
+            p.decide("http://0.255.255.255/", false),
+            Decision::Block(_)
+        ));
     }
 
     // --- NAT64 64:ff9b::/96 ---
@@ -1099,7 +1115,10 @@ mod tests {
     fn safe_blocks_nat64_embedded_private() {
         let p = ResourcePolicy::safe_profile();
         // 64:ff9b::10.0.0.1 embeds RFC1918 10.0.0.1
-        assert!(matches!(p.decide("http://[64:ff9b::10.0.0.1]/", false), Decision::Block(_)));
+        assert!(matches!(
+            p.decide("http://[64:ff9b::10.0.0.1]/", false),
+            Decision::Block(_)
+        ));
         assert!(is_private_ip("[64:ff9b::169.254.169.254]"));
         // NAT64 embedding a PUBLIC v4 stays allowed (only the embedded addr matters)
         assert!(!is_private_ip("[64:ff9b::8.8.8.8]"));
@@ -1480,12 +1499,7 @@ mod tests {
         MockResolver(
             pairs
                 .iter()
-                .map(|(h, ip)| {
-                    (
-                        (*h).to_string(),
-                        vec![ip.parse::<IpAddr>().unwrap()],
-                    )
-                })
+                .map(|(h, ip)| ((*h).to_string(), vec![ip.parse::<IpAddr>().unwrap()]))
                 .collect(),
         )
     }
@@ -1558,7 +1572,7 @@ mod tests {
     fn safe_unresolvable_host_is_allowed_no_private_observed() {
         let p = ResourcePolicy::safe_profile();
         let r = mock(&[]); // resolves to nothing
-        // No private IP observed → allow (Chrome will simply fail to connect).
+                           // No private IP observed → allow (Chrome will simply fail to connect).
         assert!(matches!(
             p.decide_with_resolver("http://nonexistent.invalid/", false, &r),
             Decision::Allow
@@ -1570,9 +1584,15 @@ mod tests {
         let p = ResourcePolicy::safe_profile();
         // public first, private second — loop must continue past the public and block.
         let r = MockResolver(
-            [("mixed.example".to_string(),
-              vec!["93.184.216.34".parse::<IpAddr>().unwrap(), "10.0.0.5".parse::<IpAddr>().unwrap()])]
-                .into_iter().collect(),
+            [(
+                "mixed.example".to_string(),
+                vec![
+                    "93.184.216.34".parse::<IpAddr>().unwrap(),
+                    "10.0.0.5".parse::<IpAddr>().unwrap(),
+                ],
+            )]
+            .into_iter()
+            .collect(),
         );
         assert!(matches!(
             p.decide_with_resolver("http://mixed.example/", false, &r),
